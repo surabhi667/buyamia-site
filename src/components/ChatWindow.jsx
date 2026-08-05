@@ -1,0 +1,132 @@
+import { useEffect, useRef, useState } from 'react'
+
+const initialMessages = [
+  {
+    id: 1,
+    role: 'assistant',
+    text: 'Hi there 👋 I am Amia, powered by Buyamia. How can I help?',
+    time: '1 min ago',
+  },
+]
+
+const prompts = ['Discover products', 'About Amia', 'Affiliate Program', 'Procurement Solutions']
+
+function ChatHeader({ onClose }) {
+  return (
+    <header className="amia-chat__header">
+      <span className="amia-chat__mark" aria-hidden="true">✦</span>
+      <span>Tell us what you need. We&apos;ll find it.</span>
+      <button type="button" onClick={onClose} aria-label="Minimize Amia chat">⌄</button>
+    </header>
+  )
+}
+
+function ProductSuggestions({ products }) {
+  return (
+    <div className="amia-chat__products">
+      {products.map((product) => (
+        <a href="#featured" key={product.title}>
+          <img src={product.image} alt="" />
+          <span><strong>{product.title}</strong><small>{product.offer}<i>☆ 5/5</i></small></span>
+        </a>
+      ))}
+    </div>
+  )
+}
+
+function ChatMessage({ message }) {
+  return (
+    <article className={`amia-message amia-message--${message.role}`}>
+      <div className="amia-message__bubble">
+        <p>{message.text}</p>
+        {message.products && <ProductSuggestions products={message.products} />}
+      </div>
+      <small>{message.role === 'assistant' ? 'Amia · AI Agent' : 'You'} · {message.time}</small>
+    </article>
+  )
+}
+
+function ChatInput({ value, onChange, onSend }) {
+  function handleKeyDown(event) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      onSend()
+    }
+  }
+
+  return (
+    <div className="amia-chat__composer">
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Ask a question..."
+        aria-label="Message Amia"
+      />
+      <div className="amia-chat__tools" aria-hidden="true"><span>⌕</span><span>☺</span><span>♩</span></div>
+      <button type="button" onClick={onSend} disabled={!value.trim()} aria-label="Send message">↑</button>
+    </div>
+  )
+}
+
+export default function ChatWindow() {
+  const [open, setOpen] = useState(false)
+  const [messages, setMessages] = useState(initialMessages)
+  const [draft, setDraft] = useState('')
+  const [typing, setTyping] = useState(false)
+  const historyRef = useRef(null)
+  const responseTimerRef = useRef(null)
+
+  useEffect(() => {
+    if (open && historyRef.current) historyRef.current.scrollTop = historyRef.current.scrollHeight
+  }, [messages, open, typing])
+
+  useEffect(() => () => clearTimeout(responseTimerRef.current), [])
+
+  function sendMessage(text = draft) {
+    const cleanText = text.trim()
+    if (!cleanText) return
+    setMessages((current) => [...current, { id: Date.now(), role: 'user', text: cleanText, time: 'Just now' }])
+    setDraft('')
+    setTyping(true)
+    clearTimeout(responseTimerRef.current)
+    responseTimerRef.current = setTimeout(() => {
+      setMessages((current) => [...current, {
+        id: Date.now() + 1,
+        role: 'assistant',
+        text: 'Here are some marketplace options that match your brief:',
+        time: 'Just now',
+        products: [
+          { image: '/assets/featured-1.png', title: 'Coconut shell tableware set', offer: '-50%' },
+          { image: '/assets/featured-2.png', title: 'Stone pedestal side table', offer: '-30%' },
+          { image: '/assets/featured-3.png', title: 'Modern artisan accent chair', offer: '-70%' },
+        ],
+      }])
+      setTyping(false)
+    }, 650)
+  }
+
+  return (
+    <section className={`amia-chat${open ? ' is-open' : ''}`} aria-label="Amia AI chat">
+      {!open && (
+        <button className="amia-chat__launcher" type="button" onClick={() => setOpen(true)} aria-expanded="false">
+          <span aria-hidden="true">✦</span><span className="amia-chat__launcher-label">Chat with Amia</span><span aria-hidden="true">⌃</span>
+        </button>
+      )}
+      {open && (
+        <div className="amia-chat__window">
+          <ChatHeader onClose={() => setOpen(false)} />
+          <div className="amia-chat__history" ref={historyRef}>
+            {messages.map((message) => <ChatMessage message={message} key={message.id} />)}
+            {typing && <div className="amia-chat__typing" aria-label="Amia is typing"><span /><span /><span /></div>}
+          </div>
+          {messages.length === 1 && <div className="amia-chat__prompts">
+            {prompts.map((prompt) => <button type="button" onClick={() => sendMessage(prompt)} key={prompt}>{prompt}</button>)}
+          </div>}
+          <ChatInput value={draft} onChange={setDraft} onSend={() => sendMessage()} />
+          <p className="amia-chat__privacy">By chatting with Amia, you agree to our <u>Privacy Policy.</u></p>
+        </div>
+      )}
+    </section>
+  )
+}

@@ -1,3 +1,26 @@
+import { useState } from 'react'
+import { LeftSidebar, RightSidebar } from './components/Sidebars'
+import ChatWindow from './components/ChatWindow'
+import SearchBar from './components/SearchBar'
+import AccountPage from './components/AccountPage'
+import SupportPage from './components/SupportPage'
+import ShippingAddressesPage from './components/ShippingAddressesPage'
+import SecurityPage from './components/SecurityPage'
+import BankAccountsPage from './components/BankAccountsPage'
+import OrdersPage from './components/OrdersPage'
+import BrowsingHistoryPage from './components/BrowsingHistoryPage'
+import WishlistPage from './components/WishlistPage'
+import AffiliatePage from './components/AffiliatePage'
+import CategoriesPage from './components/CategoriesPage'
+import BrandsPage from './components/BrandsPage'
+import SourcePage from './components/SourcePage'
+import CartPage from './components/CartPage'
+import AskAmiaPage from './components/AskAmiaPage'
+import SavedPage from './components/SavedPage'
+import SellerExperiencePage from './components/SellerExperiencePage'
+import AboutPage from './components/AboutPage'
+import AuctionsPage from './components/AuctionsPage'
+import MarketplacesPage from './components/MarketplacesPage'
 import './App.css'
 
 const categories = [
@@ -110,12 +133,40 @@ function CarouselNav() {
 }
 
 export default function App() {
+  const [leftOpen, setLeftOpen] = useState(false)
+  const [rightOpen, setRightOpen] = useState(false)
+  const isAccountPage = window.location.pathname === '/account'
+  const isSupportPage = window.location.pathname === '/support'
+  const isShippingAddressesPage = window.location.pathname === '/account/shipping-addresses'
+  const isSecurityPage = window.location.pathname === '/account/security'
+  const isBankAccountsPage = window.location.pathname === '/account/bank-accounts'
+  const isOrdersPage = window.location.pathname === '/account/orders'
+  const isBrowsingHistoryPage = window.location.pathname === '/account/history'
+  const isWishlistPage = window.location.pathname === '/account/wishlist'
+  const isAffiliatePage = window.location.pathname === '/account/affiliate'
+  const isCategoriesPage = window.location.pathname === '/categories'
+  const isBrandsPage = window.location.pathname === '/brands'
+  const isSourcePage = window.location.pathname === '/source'
+  const isCartPage = window.location.pathname === '/cart' || window.location.pathname.startsWith('/checkout/')
+  const isAskAmiaPage = window.location.pathname === '/ask-amia'
+  const isSavedPage = window.location.pathname === '/saved' || window.location.pathname.startsWith('/saved/')
+  const isSellerPage = window.location.pathname === '/sell-on-buyamia' || window.location.pathname.startsWith('/sellers/')
+  const isAboutPage = window.location.pathname === '/about'
+  const isAuctionsPage = window.location.pathname === '/auctions' || window.location.pathname.startsWith('/auctions/')
+  const isMarketplacesPage = window.location.pathname === '/marketplaces' || window.location.pathname.startsWith('/marketplaces/')
+
   return (
-    <div className="site">
+    <div className={`site${leftOpen ? ' site--left-open' : ''}${rightOpen ? ' site--right-open' : ''}`}>
       <div className="top-banner">
         Discover and shop premium Indonesian products at our online wholesale marketplace
         <span aria-hidden="true">→</span>
       </div>
+
+      <LeftSidebar open={leftOpen} onToggle={() => setLeftOpen((value) => !value)} />
+      <RightSidebar open={rightOpen} onToggle={() => setRightOpen((value) => !value)} />
+      <ChatWindow />
+
+      <div className="site-content">
 
       <header className="site-header">
         <div className="shell site-header__inner">
@@ -123,33 +174,32 @@ export default function App() {
             buyamia
           </a>
           <nav className="nav-links" aria-label="Primary">
-            <a href="#categories">
+            <a href="/categories">
               Categories <span className="chevron">▾</span>
             </a>
-            <a href="#featured">
+            <a href="/brands">
               Brands <span className="chevron">▾</span>
             </a>
-            <a href="#ways">
+            <a href="/marketplaces/vehicles">
               Marketplaces <span className="chevron">▾</span>
             </a>
-            <a href="#amia">Source</a>
-            <a href="#reviews">Auctions</a>
-            <a href="#impact">About</a>
+            <a href="/source">Source</a>
+            <a href="/auctions">Auctions</a>
+            <a href="/about">About</a>
           </nav>
           <div className="header-actions">
-            <a className="text-link" href="#sell">
+            <a className="text-link" href="/sell-on-buyamia">
               Sell on Buyamia
             </a>
             <button className="btn btn-accent" type="button">
               Start Shopping
             </button>
-            <button className="search-icon" type="button" aria-label="Search">
-              ⌕
-            </button>
+            <SearchBar />
           </div>
         </div>
       </header>
 
+      {isMarketplacesPage ? <MarketplacesPage /> : isAuctionsPage ? <AuctionsPage /> : isAboutPage ? <AboutPage /> : isSellerPage ? <SellerExperiencePage /> : isSavedPage ? <SavedPage /> : isAskAmiaPage ? <AskAmiaPage /> : isCartPage ? <CartPage /> : isAccountPage ? <AccountPage /> : isShippingAddressesPage ? <ShippingAddressesPage /> : isSecurityPage ? <SecurityPage /> : isBankAccountsPage ? <BankAccountsPage /> : isOrdersPage ? <OrdersPage /> : isBrowsingHistoryPage ? <BrowsingHistoryPage /> : isWishlistPage ? <WishlistPage /> : isAffiliatePage ? <AffiliatePage /> : isCategoriesPage ? <CategoriesPage /> : isBrandsPage ? <BrandsPage /> : isSourcePage ? <SourcePage /> : isSupportPage ? <SupportPage /> : <>
       <main>
         <section className="shell hero">
           <div className="hero-top">
@@ -527,6 +577,8 @@ export default function App() {
           <span>Privacy · Terms · Cookies</span>
         </div>
       </footer>
+      </>}
+      </div>
     </div>
   )
 }

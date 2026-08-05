@@ -1,0 +1,294 @@
+import { useState } from 'react'
+
+const icons = {
+  panel: '◧',
+  ask: '✦',
+  cart: '▢',
+  saved: '♡',
+  credit: '◉',
+  location: '⌖',
+  currency: '¤',
+  account: '◎',
+  support: '♧',
+  commerce: '◫',
+  chat: '◇',
+}
+
+function Icon({ name }) {
+  return <span className="sidebar-icon" aria-hidden="true">{icons[name]}</span>
+}
+
+function RailButton({ icon, label, onClick, controls, expanded }) {
+  return (
+    <button
+      className="rail-button"
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-controls={controls}
+      aria-expanded={expanded}
+      title={label}
+    >
+      <Icon name={icon} />
+    </button>
+  )
+}
+
+export function LeftSidebar({ open, onToggle }) {
+  return (
+    <aside className={`app-sidebar app-sidebar--left${open ? ' is-open' : ''}`} aria-label="Shopping sidebar">
+      <div className="sidebar-rail">
+        <RailButton icon="panel" label={open ? 'Close shopping sidebar' : 'Open shopping sidebar'} onClick={onToggle} controls="left-sidebar-panel" expanded={open} />
+        <div className="rail-rule" />
+        <RailButton icon="ask" label="Ask Amia" onClick={() => { window.location.href = '/ask-amia' }} />
+        <RailButton icon="cart" label="Cart" onClick={() => { window.location.href = '/cart' }} />
+        <RailButton icon="saved" label="Saved items" onClick={() => { window.location.href = '/saved' }} />
+        <div className="rail-rule" />
+        <RailButton icon="credit" label="Credit usage" />
+        <RailButton icon="location" label="Location and currency" />
+        <div className="rail-spacer" />
+        <RailButton icon="account" label="My account" onClick={() => { window.location.href = '/account' }} />
+        <RailButton icon="support" label="Support" onClick={() => { window.location.href = '/support' }} />
+      </div>
+
+      <div className="sidebar-panel" id="left-sidebar-panel" aria-hidden={!open}>
+        <div className="sidebar-heading">
+          <span>Stay Buy-A-Mazing!</span>
+          <button type="button" onClick={onToggle} aria-label="Close shopping sidebar"><Icon name="panel" /></button>
+        </div>
+
+        <nav className="sidebar-links" aria-label="Shopping tools">
+          <a href="/ask-amia"><Icon name="ask" /><span>Ask Amia</span></a>
+          <a href="/cart"><Icon name="cart" /><span>Cart</span></a>
+          <a href="/saved"><Icon name="saved" /><span>Saved</span></a>
+        </nav>
+
+        <section className="sidebar-card credit-card">
+          <div className="card-title"><span>Credit usage</span><Icon name="credit" /></div>
+          <a href="#top-up">Top up <span>→</span></a>
+          <div className="credit-meta"><span>750</span><span>Available 21,000</span></div>
+          <div className="credit-track"><span /></div>
+        </section>
+
+        <section className="sidebar-card location-card">
+          <label>
+            <span className="visually-hidden">Location</span>
+            <select defaultValue="bali" aria-label="Location">
+              <option value="bali">Bali, Indonesia</option>
+              <option value="jakarta">Jakarta, Indonesia</option>
+            </select>
+            <Icon name="location" />
+          </label>
+          <label>
+            <span className="visually-hidden">Currency</span>
+            <select defaultValue="idr" aria-label="Currency">
+              <option value="idr">IDR</option>
+              <option value="usd">USD</option>
+            </select>
+            <Icon name="currency" />
+          </label>
+          <div className="location-meta"><span>10:15 am</span><span>04 Aug 26</span></div>
+        </section>
+
+        <section className="sidebar-section category-links">
+          <h3>Shop by Category</h3>
+          <a href="#featured">Furniture</a>
+          <a href="#categories">Clothing &amp; Shoes</a>
+          <a href="#categories">Accessories</a>
+          <a href="#categories">View all categories <span>→</span></a>
+        </section>
+
+        <nav className="sidebar-links sidebar-links--bottom" aria-label="Account links">
+          <a href="/account"><Icon name="account" /><span>My Account</span></a>
+          <a href="/support"><Icon name="support" /><span>Support</span></a>
+        </nav>
+      </div>
+    </aside>
+  )
+}
+
+const flashSaleProducts = [
+  { image: '/assets/featured-1.png', title: 'Eco Friendly Bamboo side table', metric: '-50%', rating: '5/5' },
+  { image: '/assets/featured-2.png', title: 'Sculptural timber side table', metric: '-30%', rating: '5/5' },
+  { image: '/assets/featured-3.png', title: 'Hand-finished accent chair', metric: '-70%', rating: '5/5' },
+]
+
+const fastSellingProducts = [
+  { image: '/assets/product-thumb.png', title: 'Eco Friendly Bamboo side table', metric: '1.5M Sold', rating: '5/5' },
+  { image: '/assets/product-1.jpeg', title: 'Artisan mushroom table lamp', metric: '5.3k Sold', rating: '5/5' },
+  { image: '/assets/product-2.jpeg', title: 'Hand-thrown ceramic collection', metric: '17k Sold', rating: '5/5' },
+]
+
+const auctionProducts = [
+  { image: '/assets/carved-chair.jpeg', title: 'Hand carved armchair', bid: 'IDR 850,000', time: 'Ends in 02:14:32' },
+  { image: '/assets/product-3.jpeg', title: 'Abstract face sculpture', bid: 'IDR 420,000', time: 'Ends in 06:42:18' },
+]
+
+const sellerPromos = [
+  { avatar: '/assets/avatar-1.png', name: 'Sari Living', category: 'Furniture', text: 'New stock available — artisan side tables made for modern spaces.' },
+  { avatar: '/assets/avatar-2.png', name: 'Island Botanics', category: 'Beauty & Care', text: 'Handmade essentials selling out fast. Discover today’s collection.' },
+  { avatar: '/assets/avatar-3.png', name: 'Nusa Studio', category: 'Furniture', text: 'New sustainable pieces have just arrived in our workshop.' },
+  { avatar: '/assets/review-1.png', name: 'Bali Homeware', category: 'Decor', text: 'Small-batch home accents ready to ship from Indonesia.' },
+]
+
+const discussionMessages = [
+  { avatar: '/assets/avatar-2.png', name: 'Maya', text: 'Has anyone sourced hand-carved dining chairs recently?' },
+  { avatar: '/assets/avatar-1.png', name: 'Daniel', text: 'The rattan collection is beautiful. I can share my supplier notes.' },
+]
+
+function ProductRows({ items, variant }) {
+  return <div className="commerce-products">{items.map((item) => (
+    <a href="#featured" className="commerce-product" key={`${variant}-${item.title}`}>
+      <img src={item.image} alt="" />
+      <span className="commerce-product__copy">
+        <strong>{item.title}</strong>
+        <span className="commerce-product__meta">
+          <small className={variant === 'flash' ? 'is-discount' : 'is-sold'}>{item.metric}</small>
+          <small className="commerce-rating">☆ {item.rating}</small>
+        </span>
+      </span>
+    </a>
+  ))}</div>
+}
+
+function SellerPromoFeed() {
+  return <div className="seller-feed">{sellerPromos.map((promo) => (
+    <article className="seller-promo" key={promo.name}>
+      <img src={promo.avatar} alt="" />
+      <div>
+        <div className="seller-promo__meta"><span>{promo.name}</span><small>{promo.category}</small></div>
+        <p>{promo.text}</p>
+      </div>
+    </article>
+  ))}</div>
+}
+
+function AuctionRows() {
+  return (
+    <div className="auction-products">
+      {auctionProducts.map((item) => (
+        <a href="#featured" className="auction-product" key={item.title}>
+          <img src={item.image} alt="" />
+          <span>
+            <strong>{item.title}</strong>
+            <small>{item.time}</small>
+            <b>Current bid {item.bid}</b>
+          </span>
+        </a>
+      ))}
+    </div>
+  )
+}
+
+function SidebarSection({ id, label, color, open, onToggle, children, className = '' }) {
+  return (
+    <section className={`commerce-section${open ? ' is-expanded' : ''}${className ? ` ${className}` : ''}`}>
+      <button type="button" onClick={() => onToggle(id)} aria-expanded={open} aria-controls={`${id}-sidebar-content`}>
+        <span className="section-chevron">›</span>
+        {color && <i style={{ background: color }} />}
+        <span>{label}</span>
+      </button>
+      <div className="commerce-section__body" id={`${id}-sidebar-content`} aria-hidden={!open}><div>{children}</div></div>
+    </section>
+  )
+}
+
+function CommunityChat({ loggedIn, onLogin }) {
+  const [messages, setMessages] = useState([...discussionMessages, { avatar: '/assets/avatar-3.png', name: 'Ayu', text: 'I found a great lighting maker near Ubud — happy to share details.' }])
+  const [draft, setDraft] = useState('')
+
+  function sendMessage(event) {
+    event.preventDefault()
+    const text = draft.trim()
+    if (!text) return
+    setMessages((current) => [...current, { avatar: '/assets/avatar-1.png', name: 'You', text }])
+    setDraft('')
+  }
+
+  return (
+    <div className="community-chat">
+      <div className="chat-history" aria-live="polite">
+        {(loggedIn ? messages : discussionMessages).map((message, index) => (
+          <article className="chat-message" key={`${message.name}-${index}`}>
+            <img src={message.avatar} alt="" />
+            <div><small>{message.name}</small><p>{message.text}</p>{!loggedIn && <button type="button">read more</button>}</div>
+          </article>
+        ))}
+      </div>
+      {loggedIn ? (
+        <form className="chat-composer" onSubmit={sendMessage}>
+          <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Write your message..." aria-label="Community chat message" />
+          <button type="submit" aria-label="Send message">↑</button>
+        </form>
+      ) : (
+        <div className="chat-login"><small>To chat, please</small><div><button type="button" onClick={onLogin}>Log In</button><button type="button" onClick={onLogin}>Sign Up</button></div></div>
+      )}
+      <p className="chat-privacy">By chatting on Buyamia, you agree to our Privacy Policy.</p>
+    </div>
+  )
+}
+
+export function RightSidebar({ open, onToggle }) {
+  const [expanded, setExpanded] = useState(() => new Set(['flash', 'fast', 'promo']))
+  const [loggedIn, setLoggedIn] = useState(false)
+
+  function toggleSection(id) {
+    setExpanded((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  return (
+    <aside className={`app-sidebar app-sidebar--right${open ? ' is-open' : ''}`} aria-label="We-Commerce sidebar">
+      <div className="sidebar-rail">
+        <RailButton icon="panel" label={open ? 'Close We-Commerce sidebar' : 'Open We-Commerce sidebar'} onClick={onToggle} controls="right-sidebar-panel" expanded={open} />
+        <div className="rail-rule" />
+        <RailButton icon="commerce" label="We-Commerce" onClick={onToggle} controls="right-sidebar-panel" expanded={open} />
+        <div className="rail-spacer" />
+        <RailButton icon="chat" label="Community chat" onClick={onToggle} controls="right-sidebar-panel" expanded={open} />
+      </div>
+
+      <div className="sidebar-panel" id="right-sidebar-panel" aria-hidden={!open}>
+        <div className="sidebar-heading">
+          <button type="button" onClick={onToggle} aria-label="Close We-Commerce sidebar"><Icon name="panel" /></button>
+          <span>We-Commerce</span>
+        </div>
+
+        <div className="commerce-sections">
+          <SidebarSection id="flash" label="Flash Sale" color="var(--pink)" open={expanded.has('flash')} onToggle={toggleSection}>
+            <ProductRows items={flashSaleProducts} variant="flash" />
+          </SidebarSection>
+          <SidebarSection id="fast" label="Fast Selling" color="var(--olive)" open={expanded.has('fast')} onToggle={toggleSection}>
+            <ProductRows items={fastSellingProducts} variant="fast" />
+          </SidebarSection>
+          <SidebarSection id="promo" label="Seller's Promo" color="var(--light-charcoal)" open={expanded.has('promo')} onToggle={toggleSection}>
+            <SellerPromoFeed />
+          </SidebarSection>
+          <SidebarSection id="auctions" label="Auctions" color="#5296ee" open={expanded.has('auctions')} onToggle={toggleSection}>
+            <AuctionRows />
+          </SidebarSection>
+          <SidebarSection id="affiliate" label="Affiliate Program" open={expanded.has('affiliate')} onToggle={toggleSection}>
+            <div className="affiliate-card">
+              <p>Earn rewards. Create impact.<br />Connect the world.</p>
+              <button type="button">Apply Today <span aria-hidden="true">→</span></button>
+            </div>
+          </SidebarSection>
+        </div>
+
+        <section className="concierge-card">
+          <div><strong>Concierge Bot</strong><Icon name="support" /></div>
+          <small>Amia goes where you go.</small>
+          <p>Browse, search, and purchase directly from WhatsApp or Telegram — without opening a browser.</p>
+          <div className="concierge-actions"><button type="button">WhatsApp</button><button type="button">Telegram</button></div>
+        </section>
+
+        <SidebarSection id="community" label="Community Chat" open={expanded.has('community')} onToggle={toggleSection} className="community-section">
+          <CommunityChat loggedIn={loggedIn} onLogin={() => setLoggedIn(true)} />
+        </SidebarSection>
+      </div>
+    </aside>
+  )
+}
