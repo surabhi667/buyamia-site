@@ -21,6 +21,9 @@ import SellerExperiencePage from './components/SellerExperiencePage'
 import AboutPage from './components/AboutPage'
 import AuctionsPage from './components/AuctionsPage'
 import MarketplacesPage from './components/MarketplacesPage'
+import FlashSalesPage from './components/FlashSalesPage'
+import FastSellingPage from './components/FastSellingPage'
+import SellerPromotionsPage from './components/SellerPromotionsPage'
 import './App.css'
 
 const categories = [
@@ -154,6 +157,9 @@ export default function App() {
   const isAboutPage = window.location.pathname === '/about'
   const isAuctionsPage = window.location.pathname === '/auctions' || window.location.pathname.startsWith('/auctions/')
   const isMarketplacesPage = window.location.pathname === '/marketplaces' || window.location.pathname.startsWith('/marketplaces/')
+  const isFlashSalesPage = window.location.pathname === '/flash-sales' || window.location.pathname.startsWith('/flash-sales/')
+  const isFastSellingPage = window.location.pathname === '/fast-selling' || window.location.pathname.startsWith('/fast-selling/')
+  const isSellerPromotionsPage = window.location.pathname === '/seller-promotions' || window.location.pathname.startsWith('/seller-promotions/')
 
   return (
     <div className={`site${leftOpen ? ' site--left-open' : ''}${rightOpen ? ' site--right-open' : ''}`}>
@@ -199,7 +205,7 @@ export default function App() {
         </div>
       </header>
 
-      {isMarketplacesPage ? <MarketplacesPage /> : isAuctionsPage ? <AuctionsPage /> : isAboutPage ? <AboutPage /> : isSellerPage ? <SellerExperiencePage /> : isSavedPage ? <SavedPage /> : isAskAmiaPage ? <AskAmiaPage /> : isCartPage ? <CartPage /> : isAccountPage ? <AccountPage /> : isShippingAddressesPage ? <ShippingAddressesPage /> : isSecurityPage ? <SecurityPage /> : isBankAccountsPage ? <BankAccountsPage /> : isOrdersPage ? <OrdersPage /> : isBrowsingHistoryPage ? <BrowsingHistoryPage /> : isWishlistPage ? <WishlistPage /> : isAffiliatePage ? <AffiliatePage /> : isCategoriesPage ? <CategoriesPage /> : isBrandsPage ? <BrandsPage /> : isSourcePage ? <SourcePage /> : isSupportPage ? <SupportPage /> : <>
+      {isSellerPromotionsPage ? <SellerPromotionsPage /> : isFastSellingPage ? <FastSellingPage /> : isFlashSalesPage ? <FlashSalesPage /> : isMarketplacesPage ? <MarketplacesPage /> : isAuctionsPage ? <AuctionsPage /> : isAboutPage ? <AboutPage /> : isSellerPage ? <SellerExperiencePage /> : isSavedPage ? <SavedPage /> : isAskAmiaPage ? <AskAmiaPage /> : isCartPage ? <CartPage /> : isAccountPage ? <AccountPage /> : isShippingAddressesPage ? <ShippingAddressesPage /> : isSecurityPage ? <SecurityPage /> : isBankAccountsPage ? <BankAccountsPage /> : isOrdersPage ? <OrdersPage /> : isBrowsingHistoryPage ? <BrowsingHistoryPage /> : isWishlistPage ? <WishlistPage /> : isAffiliatePage ? <AffiliatePage /> : isCategoriesPage ? <CategoriesPage /> : isBrandsPage ? <BrandsPage /> : isSourcePage ? <SourcePage /> : isSupportPage ? <SupportPage /> : <>
       <main>
         <section className="shell hero">
           <div className="hero-top">

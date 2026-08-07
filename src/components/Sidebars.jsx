@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const icons = {
   panel: '◧',
@@ -138,7 +138,7 @@ const discussionMessages = [
 
 function ProductRows({ items, variant }) {
   return <div className="commerce-products">{items.map((item) => (
-    <a href="#featured" className="commerce-product" key={`${variant}-${item.title}`}>
+    <a href={variant === 'flash' ? '/flash-sales' : variant === 'fast' ? '/fast-selling' : '#featured'} className="commerce-product" key={`${variant}-${item.title}`}>
       <img src={item.image} alt="" />
       <span className="commerce-product__copy">
         <strong>{item.title}</strong>
@@ -231,6 +231,53 @@ function CommunityChat({ loggedIn, onLogin }) {
 export function RightSidebar({ open, onToggle }) {
   const [expanded, setExpanded] = useState(() => new Set(['flash', 'fast', 'promo']))
   const [loggedIn, setLoggedIn] = useState(false)
+  const [whatsapp, setWhatsapp] = useState({ url: '', error: '' })
+  const [telegram, setTelegram] = useState({ status: 'loading', error: '' })
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch('/api/concierge/whatsapp', { signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json()
+        if (!response.ok) throw new Error(payload.error?.message || 'WhatsApp concierge is unavailable')
+        setWhatsapp({ url: payload.data.url, error: '' })
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') setWhatsapp({ url: '', error: error.message })
+      })
+    return () => controller.abort()
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch('/api/concierge/telegram/status', { signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json()
+        if (!response.ok) throw new Error(payload.error?.message || 'Telegram concierge is unavailable')
+        setTelegram({ status: payload.data.connected ? 'connected' : 'ready', error: '' })
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') setTelegram({ status: 'error', error: error.message })
+      })
+    return () => controller.abort()
+  }, [])
+
+  async function startTelegram() {
+    const popup = window.open('about:blank', '_blank')
+    if (popup) popup.opener = null
+    setTelegram((current) => ({ ...current, status: 'starting', error: '' }))
+    try {
+      const response = await fetch('/api/concierge/telegram/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error?.message || 'Telegram concierge is unavailable')
+      if (popup) popup.location.href = payload.data.url
+      else window.location.href = payload.data.url
+      setTelegram((current) => ({ ...current, status: 'started', error: '' }))
+    } catch (error) {
+      popup?.close()
+      setTelegram({ status: 'error', error: error.message })
+    }
+  }
 
   function toggleSection(id) {
     setExpanded((current) => {
@@ -258,16 +305,16 @@ export function RightSidebar({ open, onToggle }) {
         </div>
 
         <div className="commerce-sections">
-          <SidebarSection id="flash" label="Flash Sale" color="var(--pink)" open={expanded.has('flash')} onToggle={toggleSection}>
+          <SidebarSection id="flash" label="Flash Sale" color="var(--pink)" open={expanded.has('flash')} onToggle={() => { window.location.href = '/flash-sales' }}>
             <ProductRows items={flashSaleProducts} variant="flash" />
           </SidebarSection>
-          <SidebarSection id="fast" label="Fast Selling" color="var(--olive)" open={expanded.has('fast')} onToggle={toggleSection}>
+          <SidebarSection id="fast" label="Fast Selling" color="var(--olive)" open={expanded.has('fast')} onToggle={() => { window.location.href = '/fast-selling' }}>
             <ProductRows items={fastSellingProducts} variant="fast" />
           </SidebarSection>
-          <SidebarSection id="promo" label="Seller's Promo" color="var(--light-charcoal)" open={expanded.has('promo')} onToggle={toggleSection}>
+          <SidebarSection id="promo" label="Seller's Promo" color="var(--light-charcoal)" open={expanded.has('promo')} onToggle={() => { window.location.href = '/seller-promotions' }}>
             <SellerPromoFeed />
           </SidebarSection>
-          <SidebarSection id="auctions" label="Auctions" color="#5296ee" open={expanded.has('auctions')} onToggle={toggleSection}>
+          <SidebarSection id="auctions" label="Auctions" color="#5296ee" open={expanded.has('auctions')} onToggle={() => { window.location.href = '/auctions' }}>
             <AuctionRows />
           </SidebarSection>
           <SidebarSection id="affiliate" label="Affiliate Program" open={expanded.has('affiliate')} onToggle={toggleSection}>
@@ -282,7 +329,7 @@ export function RightSidebar({ open, onToggle }) {
           <div><strong>Concierge Bot</strong><Icon name="support" /></div>
           <small>Amia goes where you go.</small>
           <p>Browse, search, and purchase directly from WhatsApp or Telegram — without opening a browser.</p>
-          <div className="concierge-actions"><button type="button">WhatsApp</button><button type="button">Telegram</button></div>
+          <div className="concierge-actions"><button type="button" disabled={!whatsapp.url} title={whatsapp.error || 'Open Buyamia concierge on WhatsApp'} onClick={() => window.open(whatsapp.url, '_blank', 'noopener,noreferrer')}>WhatsApp</button><button type="button" disabled={telegram.status === 'loading' || telegram.status === 'starting'} title={telegram.error || (telegram.status === 'connected' ? 'Telegram account connected' : 'Open Buyamia concierge on Telegram')} onClick={startTelegram}>{telegram.status === 'starting' ? 'Opening…' : telegram.status === 'started' || telegram.status === 'connected' ? 'Telegram ✓' : 'Telegram'}</button></div>
         </section>
 
         <SidebarSection id="community" label="Community Chat" open={expanded.has('community')} onToggle={toggleSection} className="community-section">

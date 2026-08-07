@@ -89,7 +89,7 @@ function relevance(query, fields) {
   return score
 }
 
-export function createServices(store) {
+export function createServices(store, environment = process.env) {
   const about = {
     async get() { return store.read('aboutPage') },
     async section(id) { const page = await store.read('aboutPage'); const allowed = ['company', 'confidence', 'brands', 'testimonials', 'achievement', 'verification', 'impact', 'faq', 'closing']; if (!allowed.includes(id)) throw new ApiError(404, 'ABOUT_SECTION_NOT_FOUND', 'About section not found'); const value = page[id]; if (!value) throw new ApiError(404, 'ABOUT_SECTION_NOT_FOUND', 'About section not found'); return value },
@@ -114,6 +114,36 @@ export function createServices(store) {
     },
     async detail(id) { const category = (await store.read('categories')).find((item) => (item.id === id || item.slug === id) && item.active); if (!category) throw new ApiError(404, 'CATEGORY_NOT_FOUND', 'Category not found'); const products = await store.read('products'); return { ...category, productCount: products.filter((product) => product.active && product.categoryId === category.id).length } },
     async products(id, query) { const category = await this.detail(id); const sort = query.get('sort') || 'featured'; const rawPage = query.get('page'); const rawLimit = query.get('limit'); if (!['featured', 'price_asc', 'price_desc', 'sold'].includes(sort)) throw new ApiError(400, 'VALIDATION_ERROR', 'sort is not supported'); if (rawPage !== null && (!/^\d+$/.test(rawPage) || Number(rawPage) < 1)) throw new ApiError(400, 'VALIDATION_ERROR', 'page must be a positive integer'); if (rawLimit !== null && (!/^\d+$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 100)) throw new ApiError(400, 'VALIDATION_ERROR', 'limit must be an integer between 1 and 100'); const search = normalizeSearch(query.get('search')); const products = (await store.read('products')).filter((item) => item.active && item.categoryId === category.id && (!search || normalizeSearch(item.title).includes(search))); const sorters = { price_asc: (a, b) => a.price - b.price, price_desc: (a, b) => b.price - a.price, sold: (a, b) => b.soldCount - a.soldCount, featured: (a, b) => Number(b.featured) - Number(a.featured) }; products.sort(sorters[sort]); return { category, ...paginate(products, query) } },
+    async filters(id) {
+      const category = await this.detail(id)
+      const furnitureSubcategories = ['Bathroom Accessories', 'Tubs & Sinks', 'Beds & Headboards', 'Chest of Drawers', 'Tabourets & Pouffes', 'Sofas & Couches', 'Coffee tables', 'Dividers']
+      return { category: { id: category.id, name: category.name }, styles: ['Modern','Traditional','Minimalist','Rustic','Industrial','Bohemian','Scandinavian','Coastal'], moods: ['Calm','Energetic','Cozy','Elegant','Playful','Romantic','Formal'], rooms: ['Living room','Dining room','Bedroom','Bathroom','Office','Outdoor'], colors: ['white','cream','yellow','beige','gray','silver','black','tan','orange','brown','dark-brown','red','gold','olive','green','pink','blue','royal-blue','lime','bright-yellow','purple','magenta'], subcategories: category.id === 'furniture' ? furnitureSubcategories : category.children, price: { minimum: 0, maximum: 10000000, currency: 'IDR' }, sorting: [{ id: 'featured', name: 'Featured' },{ id: 'popular', name: 'Most Popular' },{ id: 'best-selling', name: 'Best Selling' },{ id: 'rating', name: 'Highest Rated' },{ id: 'newest', name: 'Newest' },{ id: 'price_asc', name: 'Price: Low to High' },{ id: 'price_desc', name: 'Price: High to Low' },{ id: 'alphabetical', name: 'Alphabetical' }] }
+    },
+    async browseProducts(id, query) {
+      const category = await this.detail(id); const available = await this.filters(id); const q = normalizeSearch(query.get('q') || query.get('search')); const rawSearch = query.get('q') ?? query.get('search'); const subcategory = text(query.get('subcategory'), 'subcategory', { max: 100, required: false }); const room = text(query.get('room'), 'room', { max: 80, required: false }); const sort = query.get('sort') || 'featured'; const premium = query.get('premium'); const minPrice = query.get('minPrice') === null ? null : Number(query.get('minPrice')); const maxPrice = query.get('maxPrice') === null ? null : Number(query.get('maxPrice')); const rawPage = query.get('page'); const rawLimit = query.get('limit')
+      const selections = Object.fromEntries(['style','mood','color'].map((field) => [field, [...new Set(query.getAll(field).flatMap((value) => value.split(',')).map((value) => value.trim()).filter(Boolean))]]))
+      if (rawSearch !== null && !q) throw new ApiError(400, 'SEARCH_QUERY_REQUIRED', 'search must contain at least one non-whitespace character')
+      if (q.length > 160) throw new ApiError(400, 'VALIDATION_ERROR', 'search must contain at most 160 characters')
+      if (!available.sorting.some((item) => item.id === sort)) throw new ApiError(400, 'VALIDATION_ERROR', 'sort is not supported')
+      if (premium !== null && !['true','false'].includes(premium)) throw new ApiError(400, 'VALIDATION_ERROR', 'premium must be true or false')
+      if (subcategory && !available.subcategories.some((item) => item.toLowerCase() === subcategory.toLowerCase())) throw new ApiError(400, 'VALIDATION_ERROR', 'subcategory is not supported')
+      if (room && !available.rooms.some((item) => item.toLowerCase() === room.toLowerCase())) throw new ApiError(400, 'VALIDATION_ERROR', 'room is not supported')
+      for (const [field, values, allowed] of [['style',selections.style,available.styles],['mood',selections.mood,available.moods],['color',selections.color,available.colors]]) if (values.some((value) => !allowed.some((item) => item.toLowerCase() === value.toLowerCase()))) throw new ApiError(400, 'VALIDATION_ERROR', `${field} contains an unsupported value`)
+      if ((minPrice !== null && (!Number.isFinite(minPrice) || minPrice < 0)) || (maxPrice !== null && (!Number.isFinite(maxPrice) || maxPrice < 0)) || (minPrice !== null && maxPrice !== null && minPrice > maxPrice)) throw new ApiError(400, 'VALIDATION_ERROR', 'price range is invalid')
+      if (rawPage !== null && (!/^\d+$/.test(rawPage) || Number(rawPage) < 1)) throw new ApiError(400, 'VALIDATION_ERROR', 'page must be a positive integer')
+      if (rawLimit !== null && (!/^\d+$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 100)) throw new ApiError(400, 'VALIDATION_ERROR', 'limit must be an integer between 1 and 100')
+      const attributeSets = [
+        { subcategory: 'Coffee tables', styles: ['Traditional','Scandinavian'], moods: ['Calm','Formal'], room: 'Living room', colors: ['brown','beige'] },
+        { subcategory: 'Coffee tables', styles: ['Modern','Minimalist'], moods: ['Calm','Elegant'], room: 'Living room', colors: ['gray','white'] },
+        { subcategory: 'Sofas & Couches', styles: ['Industrial','Modern'], moods: ['Energetic','Playful'], room: 'Living room', colors: ['brown','black'] },
+        { subcategory: category.children[0] || 'Decor', styles: ['Bohemian','Coastal'], moods: ['Cozy','Romantic'], room: 'Dining room', colors: ['blue','cream'] },
+        { subcategory: category.children[0] || 'Lighting', styles: ['Modern','Scandinavian'], moods: ['Warm','Formal'], room: 'Bedroom', colors: ['yellow','beige'] },
+      ]
+      const [products, brands] = await Promise.all([store.read('products'), store.read('brands')]); const tokens = q.split(' ').filter(Boolean)
+      let rows = products.filter((item) => item.active && item.categoryId === category.id).map((product, index) => { const attributes = { ...attributeSets[index % attributeSets.length], ...(product.catalogAttributes || {}) }; const supplier = brands.find((brand) => brand.productIds.includes(product.id)); return { ...product, ...attributes, premium: product.premium ?? product.featured, availability: product.active && (product.stock ?? 100) > 0, supplier: supplier ? { id: supplier.id, name: supplier.name, country: supplier.country, verified: supplier.verified } : null, reviewCount: product.reviewCount || Math.max(1, Math.round(product.soldCount / 1000)), addedAt: product.createdAt } })
+      rows = rows.filter((product) => (!tokens.length || tokens.every((token) => normalizeSearch(`${product.title} ${product.description || ''} ${product.subcategory} ${product.styles.join(' ')} ${product.supplier?.name || ''}`).includes(token))) && (!subcategory || product.subcategory.toLowerCase() === subcategory.toLowerCase()) && (!room || product.room.toLowerCase() === room.toLowerCase()) && (premium === null || product.premium === (premium === 'true')) && (minPrice === null || product.price >= minPrice) && (maxPrice === null || product.price <= maxPrice) && (!selections.style.length || selections.style.some((value) => product.styles.some((item) => item.toLowerCase() === value.toLowerCase()))) && (!selections.mood.length || selections.mood.some((value) => product.moods.some((item) => item.toLowerCase() === value.toLowerCase()))) && (!selections.color.length || selections.color.some((value) => product.colors.some((item) => item.toLowerCase() === value.toLowerCase()))))
+      const sorters = { featured: (a,b) => Number(b.featured)-Number(a.featured), popular: (a,b) => b.reviewCount-a.reviewCount || b.rating-a.rating, 'best-selling': (a,b) => b.soldCount-a.soldCount, rating: (a,b) => b.rating-a.rating, newest: newestFirst, price_asc: (a,b) => a.price-b.price, price_desc: (a,b) => b.price-a.price, alphabetical: (a,b) => a.title.localeCompare(b.title) }; rows.sort(sorters[sort]); const result = paginate(rows, query); return { category, products: result.data, data: result.data, meta: result.meta, availableFilters: available, selectedFilters: { search: q, subcategory: subcategory || null, styles: selections.style, moods: selections.mood, room: room || null, colors: selections.color, minPrice, maxPrice, premium: premium === null ? null : premium === 'true' }, sorting: { selected: sort, options: available.sorting } }
+    },
     async create(body) {
       const name = text(body.name, 'name', { max: 80 })
       const slug = text(body.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), 'slug', { max: 100 })
@@ -183,6 +213,107 @@ export function createServices(store) {
     async marketplaceSellers(id = 'vehicles') { const listings = await store.read('marketplaceListings'); return (await store.read('marketplaceDealers')).filter((item) => item.marketplaceId === id && item.approved).map((item) => ({ ...item, products: item.listingIds.map((listingId) => listings.find((listing) => listing.id === listingId && listing.available)).filter(Boolean) })) },
   }
 
+  function flashSaleStatus(sale) {
+    const now = Date.now()
+    if (now < new Date(sale.startTime).getTime()) return 'upcoming'
+    if (now >= new Date(sale.endTime).getTime()) return 'expired'
+    return 'active'
+  }
+
+  async function flashSaleRows() {
+    const [sales, products, categories, brands] = await Promise.all(['flashSales', 'products', 'categories', 'brands'].map((name) => store.read(name)))
+    const productById = new Map(products.map((item) => [item.id, item]))
+    const categoryById = new Map(categories.map((item) => [item.id, item]))
+    return sales.map((sale) => {
+      const status = flashSaleStatus(sale)
+      const saleProducts = sale.products.map((entry) => {
+        const product = productById.get(entry.productId)
+        if (!product) return null
+        const seller = brands.find((brand) => brand.productIds.includes(product.id)) || null
+        return { ...product, description: product.description || `${product.title}, selected for a limited-time Buyamia event.`, originalPrice: product.price, salePrice: entry.salePrice, discountPercent: Math.round((1 - entry.salePrice / product.price) * 100), remainingStock: entry.remainingStock, availability: status !== 'expired' && entry.remainingStock > 0, seller: seller ? { id: seller.id, name: seller.name, verified: seller.verified } : null, category: categoryById.get(product.categoryId) || null, reviewCount: product.reviewCount || Math.max(1, Math.round(product.soldCount / 1000)), verificationBadge: seller?.verified ? 'Verified seller' : null }
+      }).filter(Boolean)
+      const end = new Date(sale.endTime).getTime(); const start = new Date(sale.startTime).getTime()
+      return { ...sale, status, remainingMs: status === 'active' ? Math.max(0, end - Date.now()) : 0, startsInMs: status === 'upcoming' ? Math.max(0, start - Date.now()) : 0, products: saleProducts, productCount: saleProducts.length, categories: [...new Set(saleProducts.map((item) => item.categoryId))] }
+    })
+  }
+
+  const flashSales = {
+    async list(query) {
+      const q = text(query.get('q') || query.get('search'), 'search', { max: 160, required: false })?.toLowerCase()
+      const status = query.get('status') || 'current'; const category = query.get('category'); const sort = query.get('sort') || 'ending-soon'; const featured = query.get('featured'); const rawPage = query.get('page'); const rawLimit = query.get('limit')
+      if (!['current', 'all', 'active', 'upcoming', 'expired'].includes(status)) throw new ApiError(400, 'VALIDATION_ERROR', 'status is not supported')
+      if (!['ending-soon', 'starting-soon', 'newest', 'discount-high', 'title'].includes(sort)) throw new ApiError(400, 'VALIDATION_ERROR', 'sort is not supported')
+      if (featured !== null && !['true', 'false'].includes(featured)) throw new ApiError(400, 'VALIDATION_ERROR', 'featured must be true or false')
+      if (rawPage !== null && (!/^\d+$/.test(rawPage) || Number(rawPage) < 1)) throw new ApiError(400, 'VALIDATION_ERROR', 'page must be a positive integer')
+      if (rawLimit !== null && (!/^\d+$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 100)) throw new ApiError(400, 'VALIDATION_ERROR', 'limit must be between 1 and 100')
+      if (category && !(await store.read('categories')).some((item) => item.id === category && item.active)) throw new ApiError(404, 'CATEGORY_NOT_FOUND', 'Flash sale category not found')
+      let rows = (await flashSaleRows()).filter((sale) => (status === 'all' || (status === 'current' ? sale.status !== 'expired' : sale.status === status)) && (!category || sale.categories.includes(category)) && (featured === null || sale.featured === (featured === 'true')) && (!q || `${sale.title} ${sale.description} ${sale.products.map((item) => item.title).join(' ')}`.toLowerCase().includes(q)))
+      const maxDiscount = (sale) => Math.max(0, ...sale.products.map((item) => item.discountPercent)); const sorters = { 'ending-soon': (a, b) => (a.status === 'active' ? 0 : 1) - (b.status === 'active' ? 0 : 1) || new Date(a.endTime) - new Date(b.endTime), 'starting-soon': (a, b) => new Date(a.startTime) - new Date(b.startTime), newest: newestFirst, 'discount-high': (a, b) => maxDiscount(b) - maxDiscount(a), title: (a, b) => a.title.localeCompare(b.title) }
+      rows.sort(sorters[sort]); return paginate(rows, query)
+    },
+    async get(id) { const sale = (await flashSaleRows()).find((item) => item.id === id); if (!sale) throw new ApiError(404, 'FLASH_SALE_NOT_FOUND', 'Flash sale not found'); return sale },
+    async categories() { const [categories, sales] = await Promise.all([store.read('categories'), flashSaleRows()]); const ids = new Set(sales.filter((sale) => sale.status !== 'expired').flatMap((sale) => sale.categories)); return categories.filter((item) => item.active && ids.has(item.id)).map(({ id, name, slug }) => ({ id, name, slug })) },
+  }
+
+  async function fastSellingRows() {
+    const [products, categories, brands] = await Promise.all(['products', 'categories', 'brands'].map((name) => store.read(name)))
+    const categoryById = new Map(categories.map((item) => [item.id, item]))
+    return products.filter((product) => product.active && product.soldCount > 0).map((product) => {
+      const seller = brands.find((brand) => brand.productIds.includes(product.id)) || null
+      const stock = product.stock ?? Math.max(1, Math.round(product.soldCount / 1000))
+      const currentPrice = product.discountPercent ? Math.round(product.price * (1 - product.discountPercent / 100)) : product.price
+      return { ...product, description: product.description || `${product.title}, a popular choice from Buyamia's verified Indonesian marketplace.`, images: product.images || [product.image], originalPrice: product.discountPercent ? product.price : null, currentPrice, stock, availability: stock > 0, stockStatus: stock > 10 ? 'in-stock' : stock > 0 ? 'low-stock' : 'out-of-stock', seller: seller ? { id: seller.id, name: seller.name, country: seller.country, verified: seller.verified } : null, category: categoryById.get(product.categoryId) || null, reviewCount: product.reviewCount || Math.max(1, Math.round(product.soldCount / 1000)), verificationBadge: seller?.verified ? 'Verified seller' : null }
+    })
+  }
+
+  const fastSelling = {
+    async list(query) {
+      const q = text(query.get('q') || query.get('search'), 'search', { max: 160, required: false })?.toLowerCase(); const category = query.get('category'); const seller = query.get('seller'); const sort = query.get('sort') || 'sales-volume'; const featured = query.get('featured'); const minPrice = query.get('minPrice') === null ? null : Number(query.get('minPrice')); const maxPrice = query.get('maxPrice') === null ? null : Number(query.get('maxPrice')); const rawPage = query.get('page'); const rawLimit = query.get('limit')
+      if (!['popularity', 'sales-volume', 'newest', 'price-asc', 'price-desc'].includes(sort)) throw new ApiError(400, 'VALIDATION_ERROR', 'sort is not supported')
+      if (featured !== null && !['true', 'false'].includes(featured)) throw new ApiError(400, 'VALIDATION_ERROR', 'featured must be true or false')
+      if ((minPrice !== null && (!Number.isFinite(minPrice) || minPrice < 0)) || (maxPrice !== null && (!Number.isFinite(maxPrice) || maxPrice < 0)) || (minPrice !== null && maxPrice !== null && minPrice > maxPrice)) throw new ApiError(400, 'VALIDATION_ERROR', 'price range is invalid')
+      if (rawPage !== null && (!/^\d+$/.test(rawPage) || Number(rawPage) < 1)) throw new ApiError(400, 'VALIDATION_ERROR', 'page must be a positive integer')
+      if (rawLimit !== null && (!/^\d+$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 100)) throw new ApiError(400, 'VALIDATION_ERROR', 'limit must be between 1 and 100')
+      if (category && !(await store.read('categories')).some((item) => item.id === category && item.active)) throw new ApiError(404, 'CATEGORY_NOT_FOUND', 'Fast-selling category not found')
+      if (seller && !(await store.read('brands')).some((item) => item.id === seller)) throw new ApiError(404, 'SELLER_NOT_FOUND', 'Fast-selling seller not found')
+      let rows = (await fastSellingRows()).filter((product) => (!q || `${product.title} ${product.description} ${product.seller?.name || ''}`.toLowerCase().includes(q)) && (!category || product.categoryId === category) && (!seller || product.seller?.id === seller) && (featured === null || product.featured === (featured === 'true')) && (minPrice === null || product.currentPrice >= minPrice) && (maxPrice === null || product.currentPrice <= maxPrice))
+      const sorters = { popularity: (a, b) => b.rating - a.rating || b.reviewCount - a.reviewCount, 'sales-volume': (a, b) => b.soldCount - a.soldCount, newest: newestFirst, 'price-asc': (a, b) => a.currentPrice - b.currentPrice, 'price-desc': (a, b) => b.currentPrice - a.currentPrice }; rows.sort(sorters[sort]); return paginate(rows, query)
+    },
+    async get(id) { const product = (await fastSellingRows()).find((item) => item.id === id); if (!product) throw new ApiError(404, 'FAST_SELLING_PRODUCT_NOT_FOUND', 'Fast-selling product not found'); return product },
+    async categories() { const [categories, products] = await Promise.all([store.read('categories'), fastSellingRows()]); const ids = new Set(products.map((item) => item.categoryId)); return categories.filter((item) => item.active && ids.has(item.id)).map(({ id, name, slug }) => ({ id, name, slug })) },
+    async sellers() { const rows = await fastSellingRows(); return [...new Map(rows.filter((item) => item.seller).map((item) => [item.seller.id, item.seller])).values()] },
+  }
+
+  async function sellerPromotionRows() {
+    const [promotions, products, categories, profiles, brands] = await Promise.all(['sellerPromotions', 'products', 'categories', 'sellerProfiles', 'brands'].map((name) => store.read(name)))
+    const productById = new Map(products.map((item) => [item.id, item])); const categoryById = new Map(categories.map((item) => [item.id, item]))
+    return promotions.map((promotion, index) => {
+      const product = productById.get(promotion.productId) || products.filter((item) => item.active)[index % products.filter((item) => item.active).length]
+      const profile = profiles.find((item) => item.id === promotion.sellerId); const brand = brands.find((item) => item.name === promotion.sellerName || item.productIds.includes(product?.id)); const seller = profile ? { id: profile.id, name: profile.displayName, avatar: promotion.avatar, verified: profile.verificationStatus === 'approved', location: profile.location } : { id: promotion.sellerId, name: promotion.sellerName, avatar: promotion.avatar, verified: Boolean(brand?.verified), location: brand?.country || 'Indonesia' }
+      const categoryId = promotion.categoryId || product?.categoryId; const discountPercent = promotion.discountPercent ?? product?.discountPercent ?? 0; const originalPrice = product?.price || 0; const discountedPrice = Math.round(originalPrice * (1 - discountPercent / 100)); const startTime = promotion.startTime || promotion.createdAt; const endTime = promotion.endTime || '2027-01-31T23:59:59.000Z'; const now = Date.now(); const status = !promotion.active || now >= new Date(endTime).getTime() ? 'expired' : now < new Date(startTime).getTime() ? 'upcoming' : 'active'
+      return { ...promotion, title: promotion.title || `${seller.name} Limited Offer`, description: promotion.description || promotion.text, image: promotion.image || product?.image || promotion.avatar, categoryId, category: categoryById.get(categoryId) || { id: categoryId, name: promotion.category }, seller, product: product ? { id: product.id, title: product.title, image: product.image, currency: product.currency, rating: product.rating } : null, originalPrice, discountedPrice, discountPercent, startTime, endTime, status, availability: status !== 'expired' && Boolean(product?.active), featured: Boolean(promotion.featured), remainingMs: status === 'active' ? Math.max(0, new Date(endTime).getTime() - now) : 0, startsInMs: status === 'upcoming' ? Math.max(0, new Date(startTime).getTime() - now) : 0 }
+    })
+  }
+
+  const sellerPromotions = {
+    async list(query) {
+      const q = text(query.get('q') || query.get('search'), 'search', { max: 160, required: false })?.toLowerCase(); const category = query.get('category'); const seller = query.get('seller'); const status = query.get('status') || 'active'; const featured = query.get('featured'); const sort = query.get('sort') || 'newest'; const rawPage = query.get('page'); const rawLimit = query.get('limit')
+      if (!['all', 'active', 'upcoming', 'expired'].includes(status)) throw new ApiError(400, 'VALIDATION_ERROR', 'status is not supported')
+      if (!['newest', 'ending-soon', 'discount-high', 'price-low', 'price-high', 'title'].includes(sort)) throw new ApiError(400, 'VALIDATION_ERROR', 'sort is not supported')
+      if (featured !== null && !['true', 'false'].includes(featured)) throw new ApiError(400, 'VALIDATION_ERROR', 'featured must be true or false')
+      if (rawPage !== null && (!/^\d+$/.test(rawPage) || Number(rawPage) < 1)) throw new ApiError(400, 'VALIDATION_ERROR', 'page must be a positive integer')
+      if (rawLimit !== null && (!/^\d+$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 100)) throw new ApiError(400, 'VALIDATION_ERROR', 'limit must be between 1 and 100')
+      const rows = await sellerPromotionRows()
+      if (category && !(await store.read('categories')).some((item) => item.id === category && item.active)) throw new ApiError(404, 'CATEGORY_NOT_FOUND', 'Promotion category not found')
+      if (seller && !rows.some((item) => item.seller.id === seller)) throw new ApiError(404, 'SELLER_NOT_FOUND', 'Promotion seller not found')
+      const filtered = rows.filter((item) => (status === 'all' || item.status === status) && (!category || item.categoryId === category) && (!seller || item.seller.id === seller) && (featured === null || item.featured === (featured === 'true')) && (!q || `${item.title} ${item.description} ${item.seller.name} ${item.category.name}`.toLowerCase().includes(q)))
+      const sorters = { newest: newestFirst, 'ending-soon': (a, b) => new Date(a.endTime) - new Date(b.endTime), 'discount-high': (a, b) => b.discountPercent - a.discountPercent, 'price-low': (a, b) => a.discountedPrice - b.discountedPrice, 'price-high': (a, b) => b.discountedPrice - a.discountedPrice, title: (a, b) => a.title.localeCompare(b.title) }; filtered.sort(sorters[sort]); return paginate(filtered, query)
+    },
+    async get(id) { const promotion = (await sellerPromotionRows()).find((item) => item.id === id); if (!promotion) throw new ApiError(404, 'SELLER_PROMOTION_NOT_FOUND', 'Seller promotion not found'); return promotion },
+    async categories() { const [categories, promotions] = await Promise.all([store.read('categories'), sellerPromotionRows()]); const ids = new Set(promotions.map((item) => item.categoryId)); return categories.filter((item) => item.active && ids.has(item.id)).map(({ id, name, slug }) => ({ id, name, slug })) },
+    async sellers() { return [...new Map((await sellerPromotionRows()).map((item) => [item.seller.id, item.seller])).values()] },
+  }
+
   const brands = {
     async list(query) {
       const q = normalizeSearch(query.get('q') || query.get('search')); const country = normalizeSearch(query.get('country')); const category = query.get('category'); const featured = query.get('featured'); const sort = query.get('sort') || 'name'; const rawPage = query.get('page'); const rawLimit = query.get('limit')
@@ -208,9 +339,9 @@ export function createServices(store) {
       if (!['newest', 'price_asc', 'price_desc'].includes(sort)) throw new ApiError(400, 'VALIDATION_ERROR', 'sort is not supported')
       if (rawPage !== null && (!/^\d+$/.test(rawPage) || Number(rawPage) < 1)) throw new ApiError(400, 'VALIDATION_ERROR', 'page must be a positive integer')
       if (rawLimit !== null && (!/^\d+$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 100)) throw new ApiError(400, 'VALIDATION_ERROR', 'limit must be an integer between 1 and 100')
-      const [listings, products, categories] = await Promise.all([store.read('sourcingListings'), store.read('products'), store.read('categories')]); const categoryById = new Map(categories.map((item) => [item.id, item])); const rows = listings.map((listing) => ({ ...listing, product: products.find((product) => product.id === listing.productId && product.active), category: categoryById.get(listing.categoryId)?.name || listing.categoryId })).filter((listing) => listing.product && (!q || normalizeSearch(`${listing.title} ${listing.description}`).includes(q)) && (!category || listing.categoryId === category) && (!country || normalizeSearch(listing.country).includes(country)) && (!sourceType || listing.sourceType === sourceType)); const sorters = { newest: newestFirst, price_asc: (a, b) => a.product.price - b.product.price, price_desc: (a, b) => b.product.price - a.product.price }; rows.sort(sorters[sort]); return paginate(rows, query)
+      const [listings, products, categories] = await Promise.all([store.read('sourcingListings'), store.read('products'), store.read('categories')]); const categoryById = new Map(categories.map((item) => [item.id, item])); if (category && !categoryById.has(category)) throw new ApiError(400, 'VALIDATION_ERROR', 'category is not supported'); const tokens = q.split(' ').filter(Boolean); const rows = listings.map((listing) => ({ ...listing, product: products.find((product) => product.id === listing.productId && product.active), category: categoryById.get(listing.categoryId)?.name || listing.categoryId })).filter((listing) => listing.product && (!tokens.length || tokens.every((token) => normalizeSearch(`${listing.title} ${listing.description} ${listing.product.title} ${listing.category} ${listing.country}`).includes(token))) && (!category || listing.categoryId === category) && (!country || normalizeSearch(listing.country).includes(country)) && (!sourceType || listing.sourceType === sourceType)); const sorters = { newest: newestFirst, price_asc: (a, b) => a.product.price - b.product.price, price_desc: (a, b) => b.product.price - a.product.price }; rows.sort(sorters[sort]); return paginate(rows, query)
     },
-    async detail(id) { const result = await this.list(new URLSearchParams({ limit: '100' })); const listing = result.data.find((item) => item.id === id); if (!listing) throw new ApiError(404, 'SOURCE_ITEM_NOT_FOUND', 'Sourced item not found'); const products = await store.read('products'); return { ...listing, relatedProducts: products.filter((item) => item.active && item.categoryId === listing.categoryId && item.id !== listing.productId).slice(0, 4) } },
+    async detail(id) { const result = await this.list(new URLSearchParams({ limit: '100' })); const listing = result.data.find((item) => item.id === id); if (!listing) throw new ApiError(404, 'SOURCE_ITEM_NOT_FOUND', 'Sourced item not found'); const products = await store.read('products'); const relatedProducts = products.filter((item) => item.active && item.id !== listing.productId).sort((a, b) => Number(b.categoryId === listing.categoryId) - Number(a.categoryId === listing.categoryId)).slice(0, 4); return { ...listing, relatedProducts, bundles: products.filter((item) => item.active).slice(0, 4), information: { general: 'Every externally sourced item is reviewed for useful product information before it appears on Buyamia. Pricing and availability remain subject to confirmation with the external retailer.', product: listing.description, shipping: `Available shipping options: ${listing.shipping.join(' and ')}. Final freight pricing and delivery timing are confirmed before purchase.` }, confidence: [{ id: 'quality', title: 'Buyer’s Guarantee – Quality Control', summary: 'Quality is built into how we work.', description: 'Quality-control inspections can be tailored to the quantity, complexity, and location of your order.' }, { id: 'shipping', title: 'Ship with Buyamia and Save', summary: 'Access shipping support from an experienced sourcing team.', description: 'Shipping estimates and any clearance charges are confirmed for your destination before the order proceeds.' }] } },
     async filters() { const [categories, listings] = await Promise.all([store.read('categories'), store.read('sourcingListings')]); return { categories: categories.filter((item) => item.active && listings.some((listing) => listing.categoryId === item.id)).map(({ id, name }) => ({ id, name })), countries: [...new Set(listings.map((item) => item.country))], sourceTypes: ['external'] } },
   }
 
@@ -659,7 +790,7 @@ export function createServices(store) {
   function auctionStatus(auction) { const now = Date.now(); if (auction.status === 'cancelled') return 'cancelled'; if (now < new Date(auction.startTime).getTime()) return 'upcoming'; if (now >= new Date(auction.endTime).getTime()) return 'completed'; return 'live' }
   async function auctionRows(user) { const [items, products, profiles, bids, watches] = await Promise.all(['auctions', 'products', 'sellerProfiles', 'auctionBids', 'auctionWatchlists'].map((name) => store.read(name))); const productById = new Map(products.map((item) => [item.id, item])); const sellerById = new Map(profiles.map((item) => [item.id, item])); const watched = new Set(watches.filter((item) => item.userId === user?.id).map((item) => item.auctionId)); return items.map((auction) => { const ownBids = bids.filter((bid) => bid.auctionId === auction.id).sort((a, b) => b.amount - a.amount); const highest = ownBids[0]; const status = auctionStatus(auction); return { ...auction, status, currentBid: highest?.amount ?? auction.currentBid ?? auction.startingPrice, bidCount: Math.max(auction.bidCount || 0, ownBids.length), product: productById.get(auction.productId) || null, seller: sellerById.get(auction.sellerId) || null, remainingMs: status === 'live' ? Math.max(0, new Date(auction.endTime).getTime() - Date.now()) : 0, watched: watched.has(auction.id), reserveMet: (highest?.amount ?? auction.currentBid ?? auction.startingPrice) >= auction.reservePrice } }) }
   const auctions = {
-    async list(query, user) { const q = text(query.get('q'), 'q', { max: 160, required: false })?.toLowerCase(); const status = query.get('status') || 'live'; const category = text(query.get('category'), 'category', { max: 120, required: false }); const sort = query.get('sort') || 'ending-soon'; const rawPage = query.get('page'); const rawLimit = query.get('limit'); if (!['all', 'live', 'upcoming', 'completed', 'hot-bidding'].includes(status)) throw new ApiError(400, 'VALIDATION_ERROR', 'status is not supported'); if (!['ending-soon', 'newest', 'bid-high', 'price-low', 'most-bids'].includes(sort)) throw new ApiError(400, 'VALIDATION_ERROR', 'sort is not supported'); if (rawPage !== null && (!/^\d+$/.test(rawPage) || Number(rawPage) < 1)) throw new ApiError(400, 'VALIDATION_ERROR', 'page must be a positive integer'); if (rawLimit !== null && (!/^\d+$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 100)) throw new ApiError(400, 'VALIDATION_ERROR', 'limit must be between 1 and 100'); let rows = (await auctionRows(user)).filter((item) => item.status !== 'cancelled' && (status === 'all' || (status === 'hot-bidding' ? item.status === 'live' && item.bidCount > 0 : item.status === status)) && (!category || item.categoryId === category) && (!q || `${item.title} ${item.description} ${item.seller?.displayName || ''}`.toLowerCase().includes(q))); const sorters = { 'ending-soon': (a, b) => new Date(a.endTime) - new Date(b.endTime), newest: (a, b) => new Date(b.createdAt) - new Date(a.createdAt), 'bid-high': (a, b) => b.currentBid - a.currentBid, 'price-low': (a, b) => a.currentBid - b.currentBid, 'most-bids': (a, b) => b.bidCount - a.bidCount }; rows.sort(sorters[sort]); return paginate(rows, query) },
+    async list(query, user) { const q = text(query.get('q'), 'q', { max: 160, required: false })?.toLowerCase(); const status = query.get('status') || 'live'; const category = text(query.get('category'), 'category', { max: 120, required: false }); const sort = query.get('sort') || 'ending-soon'; const premium = query.get('premium') || 'false'; const rawPage = query.get('page'); const rawLimit = query.get('limit'); if (!['all', 'live', 'upcoming', 'completed', 'hot-bidding'].includes(status)) throw new ApiError(400, 'VALIDATION_ERROR', 'status is not supported'); if (!['ending-soon', 'newest', 'bid-high', 'price-low', 'most-bids'].includes(sort)) throw new ApiError(400, 'VALIDATION_ERROR', 'sort is not supported'); if (!['true', 'false'].includes(premium)) throw new ApiError(400, 'VALIDATION_ERROR', 'premium must be true or false'); if (rawPage !== null && (!/^\d+$/.test(rawPage) || Number(rawPage) < 1)) throw new ApiError(400, 'VALIDATION_ERROR', 'page must be a positive integer'); if (rawLimit !== null && (!/^\d+$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 100)) throw new ApiError(400, 'VALIDATION_ERROR', 'limit must be between 1 and 100'); const allRows = (await auctionRows(user)).filter((item) => item.status !== 'cancelled'); const availableCategories = [...new Set(allRows.map((item) => item.categoryId).filter(Boolean))].sort(); if (category && !availableCategories.includes(category)) throw new ApiError(400, 'VALIDATION_ERROR', 'category is not supported'); const tokens = q?.split(/\s+/).filter(Boolean) || []; let rows = allRows.filter((item) => (status === 'all' || (status === 'hot-bidding' ? item.status === 'live' && item.bidCount > 0 : item.status === status)) && (!category || item.categoryId === category) && (premium !== 'true' || item.featured) && (!tokens.length || tokens.every((token) => `${item.title} ${item.description} ${item.seller?.displayName || ''} ${item.product?.title || ''}`.toLowerCase().includes(token)))); const sorters = { 'ending-soon': (a, b) => new Date(a.endTime) - new Date(b.endTime), newest: (a, b) => new Date(b.createdAt) - new Date(a.createdAt), 'bid-high': (a, b) => b.currentBid - a.currentBid, 'price-low': (a, b) => a.currentBid - b.currentBid, 'most-bids': (a, b) => b.bidCount - a.bidCount }; rows.sort(sorters[sort]); const result = paginate(rows, query); return { ...result, meta: { ...result.meta, availableCategories }, filters: { q: q || '', status, category: category || '', premium: premium === 'true', sort } } },
     async get(id, user) { const auction = (await auctionRows(user)).find((item) => item.id === id); if (!auction) throw new ApiError(404, 'AUCTION_NOT_FOUND', 'Auction not found'); return auction },
     async featured(user) { return (await auctionRows(user)).filter((item) => item.featured && item.status === 'live').sort((a, b) => a.remainingMs - b.remainingMs).slice(0, 4) },
     async bids(id, query, user) { await this.get(id, user); const rows = (await store.read('auctionBids')).filter((item) => item.auctionId === id).sort((a, b) => b.amount - a.amount || new Date(b.createdAt) - new Date(a.createdAt)).map((item) => ({ ...item, bidder: item.userId === user.id ? 'You' : `Bidder ${item.userId.slice(-4)}` })); return paginate(rows, query) },
@@ -670,5 +801,112 @@ export function createServices(store) {
     async history(query, user) { const ownBids = (await store.read('auctionBids')).filter((item) => item.userId === user.id); const latestByAuction = new Map(); ownBids.forEach((bid) => { if (!latestByAuction.has(bid.auctionId) || latestByAuction.get(bid.auctionId).amount < bid.amount) latestByAuction.set(bid.auctionId, bid) }); const byId = new Map((await auctionRows(user)).map((item) => [item.id, item])); return paginate([...latestByAuction.values()].map((bid) => ({ ...bid, auction: byId.get(bid.auctionId) })).filter((item) => item.auction).sort(newestFirst), query) },
   }
 
-  return { about, categories, marketplace, brands, source, search, community, chat, account, affiliate, support, cart, checkout, seller, auctions }
+  function requireAuthenticated(user) { if (!user.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to manage auction listings') }
+  function optionalListingText(value, field, max) { return text(value, field, { max, required: false }) || '' }
+  async function listingInput(body, current = {}) {
+    const value = { ...current }
+    if (body.title !== undefined) value.title = optionalListingText(body.title, 'title', 120)
+    if (body.description !== undefined) value.description = optionalListingText(body.description, 'description', 3000)
+    if (body.categoryId !== undefined) { const categoryId = optionalListingText(body.categoryId, 'categoryId', 120); if (categoryId && !(await store.read('categories')).some((item) => item.id === categoryId && item.active)) throw new ApiError(400, 'VALIDATION_ERROR', 'categoryId is invalid'); value.categoryId = categoryId }
+    for (const field of ['startingPrice', 'reservePrice', 'minimumOrder']) if (body[field] !== undefined) { const number = Number(body[field]); if (!Number.isSafeInteger(number) || number < (field === 'minimumOrder' ? 1 : 0)) throw new ApiError(400, 'VALIDATION_ERROR', `${field} must be a valid positive whole number`); value[field] = number }
+    for (const [field, max] of [['shippingOption',80],['customization',80],['warranty',80],['material',160],['condition',80]]) if (body[field] !== undefined) value[field] = optionalListingText(body[field], field, max)
+    if (body.dimensions !== undefined) { const dimensions = body.dimensions || {}; value.dimensions = {}; for (const field of ['width','height','length']) { const number = Number(dimensions[field] || 0); if (!Number.isFinite(number) || number < 0 || number > 100000) throw new ApiError(400, 'VALIDATION_ERROR', `dimensions.${field} is invalid`); value.dimensions[field] = number } }
+    for (const field of ['productTags','impactTags']) if (body[field] !== undefined) { if (!Array.isArray(body[field]) || body[field].length > 12) throw new ApiError(400, 'VALIDATION_ERROR', `${field} must be an array with at most 12 entries`); value[field] = body[field].map((item) => text(item, `${field} item`, { max: 80 })) }
+    if (body.images !== undefined) { if (!Array.isArray(body.images) || body.images.length > 8) throw new ApiError(400, 'VALIDATION_ERROR', 'images must contain at most 8 entries'); value.images = body.images.map((image, index) => { if (!image || typeof image !== 'object') throw new ApiError(400, 'VALIDATION_ERROR', 'Each image must contain metadata'); const name = text(image.name, 'image.name', { max: 180 }); const mimeType = text(image.mimeType, 'image.mimeType', { max: 80 }); const size = Number(image.size); if (!['image/jpeg','image/png','image/heic'].includes(mimeType)) throw new ApiError(400, 'VALIDATION_ERROR', 'Images must be JPEG, PNG, or HEIC'); if (!Number.isInteger(size) || size < 1 || size > 10 * 1024 * 1024) throw new ApiError(400, 'VALIDATION_ERROR', 'Each image must be between 1 byte and 10 MB'); return { id: image.id || store.id('auction-image'), name, mimeType, size, order: index, url: image.url || '/assets/product-thumb.png', uploadedAt: image.uploadedAt || new Date().toISOString() } }) }
+    if (body.startTime !== undefined) { const date = new Date(body.startTime); if (Number.isNaN(date.getTime())) throw new ApiError(400, 'VALIDATION_ERROR', 'startTime must be a valid date'); value.startTime = date.toISOString() }
+    if (body.endTime !== undefined) { const date = new Date(body.endTime); if (Number.isNaN(date.getTime())) throw new ApiError(400, 'VALIDATION_ERROR', 'endTime must be a valid date'); value.endTime = date.toISOString() }
+    if (value.startTime && value.endTime && new Date(value.endTime) <= new Date(value.startTime)) throw new ApiError(400, 'VALIDATION_ERROR', 'endTime must be after startTime')
+    return value
+  }
+  function listingPublicationErrors(listing) { const errors = []; if (!listing.title || listing.title.length < 3) errors.push('Title must contain at least 3 characters'); if (!listing.description || listing.description.length < 20) errors.push('Description must contain at least 20 characters'); if (!listing.categoryId) errors.push('Select a category'); if (!Number.isSafeInteger(listing.startingPrice) || listing.startingPrice < 1) errors.push('Opening bid must be greater than zero'); if (!Array.isArray(listing.images) || listing.images.length < 2) errors.push('Upload at least 2 images'); if (!listing.shippingOption) errors.push('Select a shipping option'); return errors }
+  const auctionListings = {
+    async list(query, user) { requireAuthenticated(user); const status = query.get('status') || 'all'; if (!['all','draft','published'].includes(status)) throw new ApiError(400, 'VALIDATION_ERROR', 'status is not supported'); return paginate((await store.read('auctionListings')).filter((item) => item.userId === user.id && (status === 'all' || item.status === status)).sort(newestFirst), query) },
+    async get(id, user) { requireAuthenticated(user); const listing = (await store.read('auctionListings')).find((item) => item.id === id && item.userId === user.id); if (!listing) throw new ApiError(404, 'AUCTION_LISTING_NOT_FOUND', 'Auction listing not found'); return listing },
+    async create(body, user) { requireAuthenticated(user); const values = await listingInput(body); return store.mutate((db) => { const timestamp = new Date().toISOString(); const listing = { id: store.id('auction-listing'), userId: user.id, seller: { id: user.id, name: user.name }, title: '', description: '', categoryId: '', startingPrice: 0, reservePrice: 0, minimumOrder: 1, shippingOption: '', customization: '', warranty: '', material: '', condition: '', dimensions: { width: 0, height: 0, length: 0 }, productTags: [], impactTags: [], images: [], ...values, status: 'draft', createdAt: timestamp, updatedAt: timestamp, publishedAt: null, auctionId: null }; db.auctionListings.push(listing); return listing }) },
+    async update(id, body, user) { const current = await this.get(id, user); if (current.status !== 'draft') throw new ApiError(409, 'LISTING_ALREADY_PUBLISHED', 'Published listings cannot be edited'); const values = await listingInput(body, current); return store.mutate((db) => { const listing = db.auctionListings.find((item) => item.id === id); Object.assign(listing, values, { updatedAt: new Date().toISOString() }); return listing }) },
+    async remove(id, user) { const current = await this.get(id, user); if (current.status !== 'draft') throw new ApiError(409, 'LISTING_ALREADY_PUBLISHED', 'Published listings cannot be deleted'); return store.mutate((db) => { const index = db.auctionListings.findIndex((item) => item.id === id); return db.auctionListings.splice(index, 1)[0] }) },
+    async preview(id, user) { const listing = await this.get(id, user); const errors = listingPublicationErrors(listing); return { ...listing, readyToPublish: errors.length === 0, validationErrors: errors } },
+    async upload(body, user) { requireAuthenticated(user); if (!Array.isArray(body.images) || !body.images.length) throw new ApiError(400, 'VALIDATION_ERROR', 'images must contain at least one image'); const images = await listingInput({ images: body.images }); return images.images },
+    async publish(id, user) { const listing = await this.get(id, user); if (listing.status !== 'draft') throw new ApiError(409, 'LISTING_ALREADY_PUBLISHED', 'This listing has already been published'); const errors = listingPublicationErrors(listing); if (errors.length) throw new ApiError(400, 'LISTING_INCOMPLETE', 'Complete all required listing fields before publishing', errors); const timestamp = new Date().toISOString(); const startTime = listing.startTime || timestamp; const endTime = listing.endTime || new Date(new Date(startTime).getTime() + 7 * 86400000).toISOString(); if (new Date(endTime) <= new Date(startTime)) throw new ApiError(400, 'VALIDATION_ERROR', 'Auction end time must be after its start time'); return store.mutate((db) => { const product = { id: store.id('product'), title: listing.title, description: listing.description, categoryId: listing.categoryId, image: listing.images[0].url, images: listing.images.map((item) => item.url), price: listing.startingPrice, currency: 'IDR', rating: 0, reviewCount: 0, discountPercent: 0, soldCount: 0, stock: listing.minimumOrder, featured: false, active: true, createdAt: timestamp, updatedAt: timestamp }; db.products.push(product); const sellerProfile = db.sellerProfiles.find((item) => item.userId === user.id); const auction = { id: store.id('auction'), productId: product.id, sellerId: sellerProfile?.id || `user-${user.id}`, seller: sellerProfile || listing.seller, title: listing.title, description: listing.description, images: listing.images.map((item) => item.url), categoryId: listing.categoryId, startingPrice: listing.startingPrice, currentBid: listing.startingPrice, reservePrice: listing.reservePrice || listing.startingPrice, bidIncrement: Math.max(1, Math.round(listing.startingPrice * .05)), bidCount: 0, featured: false, startTime, endTime, status: 'live', shippingOption: listing.shippingOption, customization: listing.customization, warranty: listing.warranty, material: listing.material, condition: listing.condition, dimensions: listing.dimensions, productTags: listing.productTags, impactTags: listing.impactTags, createdAt: timestamp, updatedAt: timestamp }; db.auctions.push(auction); const draft = db.auctionListings.find((item) => item.id === id); Object.assign(draft, { status: 'published', productId: product.id, auctionId: auction.id, startTime, endTime, publishedAt: timestamp, updatedAt: timestamp }); return { listing: draft, auction } }) },
+  }
+
+  const concierge = {
+    whatsapp(message) {
+      const configuredNumber = String(environment.BUYAMIA_WHATSAPP_NUMBER || '').trim()
+      const businessName = text(environment.BUYAMIA_WHATSAPP_BUSINESS_NAME || 'Buyamia', 'BUYAMIA_WHATSAPP_BUSINESS_NAME', { max: 80 })
+      const defaultMessage = text(environment.BUYAMIA_WHATSAPP_DEFAULT_MESSAGE || 'Hello, I would like help from the Buyamia concierge.', 'BUYAMIA_WHATSAPP_DEFAULT_MESSAGE', { max: 500 })
+      if (!configuredNumber) throw new ApiError(503, 'WHATSAPP_NOT_CONFIGURED', 'WhatsApp concierge is not configured')
+      if (!/^\+?[1-9]\d{7,14}$/.test(configuredNumber)) throw new ApiError(503, 'WHATSAPP_INVALID_CONFIGURATION', 'WhatsApp concierge phone number must use international format')
+      const cleanMessage = message === null ? defaultMessage : text(message, 'message', { max: 500 })
+      const phoneNumber = configuredNumber.replace(/^\+/, '')
+      return {
+        channel: 'whatsapp',
+        businessName,
+        phoneNumber: `+${phoneNumber}`,
+        message: cleanMessage,
+        url: `https://wa.me/${phoneNumber}?text=${encodeURIComponent(cleanMessage)}`,
+      }
+    },
+    async telegramStatus(user) {
+      const connection = (await store.read('telegramConnections')).find((item) => item.userId === user.id) || null
+      return {
+        configured: Boolean(String(environment.BUYAMIA_TELEGRAM_BOT_USERNAME || '').trim()),
+        connected: Boolean(connection),
+        username: connection?.telegramUsername || null,
+        telegramUserId: connection?.telegramUserId || null,
+        connectedAt: connection?.connectedAt || null,
+        lastInteractionAt: connection?.lastInteractionAt || null,
+      }
+    },
+    telegramBotUsername() {
+      const username = String(environment.BUYAMIA_TELEGRAM_BOT_USERNAME || '').trim().replace(/^@/, '')
+      if (!username) throw new ApiError(503, 'TELEGRAM_NOT_CONFIGURED', 'Telegram concierge is not configured')
+      if (!/^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(username)) throw new ApiError(503, 'TELEGRAM_INVALID_CONFIGURATION', 'Telegram bot username is invalid')
+      return username
+    },
+    async telegramStart(body, user) {
+      const botUsername = this.telegramBotUsername()
+      const message = text(body.message, 'message', { max: 500, required: false }) || null
+      const startToken = store.id('buyamia').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64)
+      const timestamp = new Date().toISOString()
+      const conversation = await store.mutate((db) => {
+        const item = { id: store.id('telegram-conversation'), userId: user.id, startToken, message, status: 'started', startedAt: timestamp, lastInteractionAt: timestamp }
+        db.telegramConversationHistory.push(item)
+        const connection = db.telegramConnections.find((entry) => entry.userId === user.id)
+        if (connection) connection.lastInteractionAt = timestamp
+        return item
+      })
+      return { conversationId: conversation.id, status: conversation.status, url: `https://t.me/${botUsername}?start=${encodeURIComponent(startToken)}`, botUsername: `@${botUsername}`, startedAt: timestamp }
+    },
+    async telegramConnect(body, user) {
+      if (!user.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in before linking a Telegram account')
+      const telegramUserId = text(String(body.telegramUserId || ''), 'telegramUserId', { max: 20 })
+      const telegramUsername = text(body.telegramUsername, 'telegramUsername', { max: 33, required: false })?.replace(/^@/, '') || null
+      if (!/^\d{5,20}$/.test(telegramUserId)) throw new ApiError(400, 'VALIDATION_ERROR', 'telegramUserId must contain 5 to 20 digits')
+      if (telegramUsername && !/^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(telegramUsername)) throw new ApiError(400, 'VALIDATION_ERROR', 'telegramUsername is invalid')
+      return store.mutate((db) => {
+        if (db.telegramConnections.some((item) => item.userId === user.id)) throw new ApiError(409, 'TELEGRAM_ALREADY_CONNECTED', 'A Telegram account is already linked to this user')
+        if (db.telegramConnections.some((item) => item.telegramUserId === telegramUserId)) throw new ApiError(409, 'TELEGRAM_ACCOUNT_IN_USE', 'This Telegram account is already linked')
+        const timestamp = new Date().toISOString()
+        const connection = { id: store.id('telegram-connection'), userId: user.id, telegramUserId, telegramUsername, status: 'linked', connectedAt: timestamp, lastInteractionAt: timestamp }
+        db.telegramConnections.push(connection)
+        return connection
+      })
+    },
+    async telegramDisconnect(user) {
+      if (!user.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in before unlinking a Telegram account')
+      return store.mutate((db) => {
+        const index = db.telegramConnections.findIndex((item) => item.userId === user.id)
+        if (index < 0) throw new ApiError(404, 'TELEGRAM_NOT_CONNECTED', 'No Telegram account is linked to this user')
+        const [connection] = db.telegramConnections.splice(index, 1)
+        return { id: connection.id, disconnected: true, disconnectedAt: new Date().toISOString() }
+      })
+    },
+    async telegramHistory(query, user) {
+      const rows = (await store.read('telegramConversationHistory')).filter((item) => item.userId === user.id).sort(newestFirst).map(({ startToken: _startToken, ...item }) => item)
+      return paginate(rows, query)
+    },
+  }
+
+  return { about, categories, marketplace, flashSales, fastSelling, sellerPromotions, brands, source, search, community, chat, account, affiliate, support, cart, checkout, seller, auctions, auctionListings, concierge }
 }

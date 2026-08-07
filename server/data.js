@@ -51,6 +51,12 @@ export const seedData = {
     { id: 'prod-ceramic-vase', title: 'Artistic Ceramic Vase', categoryId: 'home-decoration', image: '/assets/product-2.jpeg', price: 1000000, currency: 'IDR', rating: 4.8, discountPercent: 15, soldCount: 830, featured: false },
     { id: 'prod-table-lamp', title: 'Artisan Mushroom Table Lamp', categoryId: 'home-decoration', image: '/assets/product-1.jpeg', price: 1800000, currency: 'IDR', rating: 4.9, discountPercent: 20, soldCount: 4200, featured: true },
   ].map((product) => ({ ...product, active: true, createdAt: now, updatedAt: now })),
+  flashSales: [
+    { id: 'flash-sustainable-living', title: 'Sustainable Living Event', description: 'Limited-time prices on thoughtful furniture made for modern spaces.', featured: true, startTime: '2026-08-01T00:00:00.000Z', endTime: '2027-01-31T23:59:59.000Z', products: [{ productId: 'prod-bamboo-table', salePrice: 750000, remainingStock: 18 }, { productId: 'prod-stone-table', salePrice: 840000, remainingStock: 11 }] },
+    { id: 'flash-artisan-edit', title: 'The Artisan Edit', description: 'Small-batch statement pieces at exceptional event pricing.', featured: true, startTime: '2026-08-05T00:00:00.000Z', endTime: '2026-12-15T23:59:59.000Z', products: [{ productId: 'prod-accent-chair', salePrice: 1020000, remainingStock: 7 }, { productId: 'prod-table-lamp', salePrice: 1440000, remainingStock: 22 }] },
+    { id: 'flash-home-refresh', title: 'Home Refresh Preview', description: 'An upcoming selection of crafted décor and furniture.', featured: false, startTime: '2027-02-01T00:00:00.000Z', endTime: '2027-02-14T23:59:59.000Z', products: [{ productId: 'prod-ceramic-vase', salePrice: 850000, remainingStock: 30 }, { productId: 'prod-bamboo-table', salePrice: 900000, remainingStock: 25 }] },
+    { id: 'flash-midyear-archive', title: 'Midyear Craft Event', description: 'Previous limited-time offers from Indonesian makers.', featured: false, startTime: '2026-06-01T00:00:00.000Z', endTime: '2026-06-30T23:59:59.000Z', products: [{ productId: 'prod-ceramic-vase', salePrice: 800000, remainingStock: 0 }] },
+  ].map((sale) => ({ ...sale, createdAt: now, updatedAt: now })),
   marketplaces: [{ id: 'vehicles', name: 'Buyamia Motors', title: 'Let us find your next vehicle.', eyebrow: 'Just describe it.', description: 'Buyamia Motors brings Indonesia’s premium car market online. Browse verified dealerships and private sellers, or tell Amia exactly what you want and let the platform do the work.', heroPrompt: 'Ask Amia to find my car', suggestions: ['Brand', 'Engine Size', 'Make Year', 'Mileage', 'Fleet availability'], categories: [{ id: 'cars', name: 'Cars', image: '/assets/marketplace-cars.png' }, { id: 'bikes', name: 'Bikes', image: '/assets/marketplace-bikes.png' }], active: true, createdAt: now }],
   marketplaceListings: [
     ['vehicle-car-1','cars','Aurelia E7 Luxury Electric Sedan','/assets/marketplace-car.png',1250000000,'individual','dealer-archipelago',2026,1200,'electric',true,true,98],
@@ -75,9 +81,10 @@ export const seedData = {
     { id: 'source-bamboo-stool', productId: 'prod-bamboo-table', title: 'Eco Friendly Bamboo Stool', country: 'Indonesia', categoryId: 'furniture', sourceType: 'external', sourceLabel: 'Sourced Externally', sourceWebsite: 'example.com', description: 'This item was found by Amia through web-wide research and is not listed directly on Buyamia. Pricing and availability are set by the external retailer and may change without notice.', images: ['/assets/product-thumb.png', '/assets/featured-2.png', '/assets/carved-chair.jpeg', '/assets/design-chair.png'], moq: 10, shipping: ['Air Freight', 'Sea Freight'], customization: true, warranty: false, material: 'Wood · FNP · Rustic', dimensions: '215 cm × 90 cm × 165 cm', weight: '54 kgs', certifications: ['Quality control'], verified: false, createdAt: now },
   ],
   sellerPromotions: [
-    { id: 'promo-sari', sellerId: 'seller-sari', sellerName: 'Sari Living', avatar: '/assets/avatar-1.png', category: 'Furniture', text: 'New artisan side tables are available for hospitality projects.', active: true, createdAt: now },
-    { id: 'promo-island', sellerId: 'seller-island', sellerName: 'Island Botanics', avatar: '/assets/avatar-2.png', category: 'Beauty & Care', text: 'Handmade wellness essentials are ready for wholesale orders.', active: true, createdAt: now },
-    { id: 'promo-nusa', sellerId: 'seller-nusa', sellerName: 'Nusa Studio', avatar: '/assets/avatar-3.png', category: 'Furniture', text: 'Our new sustainable furniture collection has just arrived.', active: true, createdAt: now },
+    { id: 'promo-sari', sellerId: 'seller-sari', sellerName: 'Sari Living', avatar: '/assets/avatar-1.png', category: 'Furniture', categoryId: 'furniture', productId: 'prod-bamboo-table', title: 'Hospitality Furniture Event', text: 'New artisan side tables are available for hospitality projects.', image: '/assets/product-thumb.png', discountPercent: 25, featured: true, active: true, startTime: '2026-08-01T00:00:00.000Z', endTime: '2027-01-31T23:59:59.000Z', createdAt: now },
+    { id: 'promo-island', sellerId: 'seller-island', sellerName: 'Island Objects', avatar: '/assets/avatar-2.png', category: 'Home Decoration', categoryId: 'home-decoration', productId: 'prod-ceramic-vase', title: 'Island Objects Studio Offer', text: 'Handmade essentials are ready for wholesale orders.', image: '/assets/product-2.jpeg', discountPercent: 15, featured: true, active: true, startTime: '2026-08-04T00:00:00.000Z', endTime: '2026-12-31T23:59:59.000Z', createdAt: now },
+    { id: 'promo-nusa', sellerId: 'seller-nusa', sellerName: 'Nusa Studio', avatar: '/assets/avatar-3.png', category: 'Furniture', categoryId: 'furniture', productId: 'prod-accent-chair', title: 'Nusa Sustainable Collection', text: 'Our new sustainable furniture collection has just arrived.', image: '/assets/featured-3.png', discountPercent: 20, featured: false, active: true, startTime: '2026-09-01T00:00:00.000Z', endTime: '2027-03-01T23:59:59.000Z', createdAt: now },
+    { id: 'promo-island-archive', sellerId: 'seller-island', sellerName: 'Island Objects', avatar: '/assets/avatar-2.png', category: 'Home Decoration', categoryId: 'home-decoration', productId: 'prod-table-lamp', title: 'Midyear Lighting Edit', text: 'A previous limited-time offer on artisan lighting.', image: '/assets/product-1.jpeg', discountPercent: 20, featured: false, active: false, startTime: '2026-06-01T00:00:00.000Z', endTime: '2026-06-30T23:59:59.000Z', createdAt: now },
   ],
   sellerApplications: [],
   sellerDocuments: [],
@@ -99,6 +106,7 @@ export const seedData = {
     { id: 'bid-demo-3', auctionId: 'auction-chair-1', userId: 'demo-maya', amount: 1000000, createdAt: '2026-08-03T10:00:00.000Z' },
   ],
   auctionWatchlists: [],
+  auctionListings: [],
   affiliateProgram: { id: 'affiliate-default', title: 'Affiliate Program', description: 'Earn rewards. Create impact. Connect the world.', enabled: true, applicationsOpen: true },
   affiliateApplications: [],
   communityMessages: [
@@ -108,6 +116,8 @@ export const seedData = {
   conversations: [],
   chatMessages: [],
   notifications: [],
+  telegramConnections: [],
+  telegramConversationHistory: [],
   userPreferences: [],
   accounts: [],
   supportCategories: [
@@ -156,6 +166,7 @@ export function createStore(filePath) {
       for (const [collection, defaults] of Object.entries(seedData)) {
         if (state[collection] === undefined) state[collection] = structuredClone(defaults)
       }
+      if (Array.isArray(state.sellerPromotions) && !state.sellerPromotions.some((item) => item.id === 'promo-island-archive')) state.sellerPromotions.push(structuredClone(seedData.sellerPromotions.find((item) => item.id === 'promo-island-archive')))
       if (Array.isArray(state.auctions) && state.auctions.length === 0 && seedData.auctions.length) state.auctions = structuredClone(seedData.auctions)
     } catch (error) {
       if (error.code !== 'ENOENT') throw error

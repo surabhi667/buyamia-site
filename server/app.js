@@ -30,9 +30,10 @@ async function readJson(request) {
 }
 
 function userFrom(request) {
+  const authenticated = Boolean(request.headers['x-user-id'] || request.headers['x-session-id'])
   const id = String(request.headers['x-user-id'] || request.headers['x-session-id'] || 'demo-user').slice(0, 120)
   const name = String(request.headers['x-user-name'] || 'Buyamia Guest').slice(0, 80)
-  return { id, name, avatar: '/assets/avatar-1.png' }
+  return { id, name, avatar: '/assets/avatar-1.png', authenticated }
 }
 
 function match(pathname, pattern) {
@@ -62,11 +63,19 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
       let params
 
       if (request.method === 'GET' && pathname === '/api/health') return json(response, 200, { status: 'ok', service: 'buyamia-api', timestamp: new Date().toISOString() }, corsHeaders)
+      if (request.method === 'GET' && pathname === '/api/concierge/whatsapp') return json(response, 200, { data: services.concierge.whatsapp(searchParams.get('message')) }, corsHeaders)
+      if (request.method === 'GET' && pathname === '/api/concierge/telegram/status') return json(response, 200, { data: await services.concierge.telegramStatus(user) }, corsHeaders)
+      if (request.method === 'POST' && pathname === '/api/concierge/telegram/start') return json(response, 201, { data: await services.concierge.telegramStart(await readJson(request), user) }, corsHeaders)
+      if (request.method === 'POST' && pathname === '/api/concierge/telegram/connect') return json(response, 201, { data: await services.concierge.telegramConnect(await readJson(request), user) }, corsHeaders)
+      if (request.method === 'POST' && pathname === '/api/concierge/telegram/disconnect') return json(response, 200, { data: await services.concierge.telegramDisconnect(user) }, corsHeaders)
+      if (request.method === 'GET' && pathname === '/api/concierge/telegram/history') return json(response, 200, await services.concierge.telegramHistory(searchParams, user), corsHeaders)
       if (request.method === 'GET' && pathname === '/api/about') return json(response, 200, { data: await services.about.get() }, corsHeaders)
       if ((params = match(pathname, /^\/api\/about\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.about.section(params[0]) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/categories') return json(response, 200, await services.categories.list(searchParams), corsHeaders)
       if (request.method === 'POST' && pathname === '/api/categories') return json(response, 201, { data: await services.categories.create(await readJson(request)) }, corsHeaders)
-      if ((params = match(pathname, /^\/api\/categories\/([^/]+)\/products$/)) && request.method === 'GET') return json(response, 200, await services.categories.products(params[0], searchParams), corsHeaders)
+      if (request.method === 'GET' && (pathname === '/api/categories/products' || pathname === '/api/categories/search')) { const categoryId = searchParams.get('category'); if (!categoryId) throw new ApiError(400, 'VALIDATION_ERROR', 'category is required'); return json(response, 200, await services.categories.browseProducts(categoryId, searchParams), corsHeaders) }
+      if ((params = match(pathname, /^\/api\/categories\/([^/]+)\/filters$/)) && request.method === 'GET') return json(response, 200, { data: await services.categories.filters(params[0]) }, corsHeaders)
+      if ((params = match(pathname, /^\/api\/categories\/([^/]+)\/products$/)) && request.method === 'GET') return json(response, 200, await services.categories.browseProducts(params[0], searchParams), corsHeaders)
       if ((params = match(pathname, /^\/api\/categories\/([^/]+)$/))) {
         if (request.method === 'GET') return json(response, 200, { data: await services.categories.detail(params[0]) }, corsHeaders)
         if (request.method === 'PATCH' || request.method === 'PUT') return json(response, 200, { data: await services.categories.update(params[0], await readJson(request)) }, corsHeaders)
@@ -91,18 +100,44 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
       if ((params = match(pathname, /^\/api\/marketplaces\/products\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.marketplace.marketplaceProduct(params[0]) }, corsHeaders)
       if ((params = match(pathname, /^\/api\/marketplaces\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.marketplace.marketplaceOverview(params[0]) }, corsHeaders)
       if ((params = match(pathname, /^\/api\/widgets\/(flash-sales|fast-selling|seller-promotions|auctions)$/)) && request.method === 'GET') return json(response, 200, await services.marketplace.widget(params[0], searchParams), corsHeaders)
+      if (request.method === 'GET' && (pathname === '/api/flash-sales' || pathname === '/api/flash-sales/search')) return json(response, 200, await services.flashSales.list(searchParams), corsHeaders)
+      if (request.method === 'GET' && pathname === '/api/flash-sales/active') { searchParams.set('status', 'active'); return json(response, 200, await services.flashSales.list(searchParams), corsHeaders) }
+      if (request.method === 'GET' && pathname === '/api/flash-sales/upcoming') { searchParams.set('status', 'upcoming'); return json(response, 200, await services.flashSales.list(searchParams), corsHeaders) }
+      if (request.method === 'GET' && pathname === '/api/flash-sales/featured') { searchParams.set('featured', 'true'); return json(response, 200, await services.flashSales.list(searchParams), corsHeaders) }
+      if (request.method === 'GET' && pathname === '/api/flash-sales/categories') return json(response, 200, { data: await services.flashSales.categories() }, corsHeaders)
+      if ((params = match(pathname, /^\/api\/flash-sales\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.flashSales.get(params[0]) }, corsHeaders)
+      if (request.method === 'GET' && (pathname === '/api/fast-selling' || pathname === '/api/fast-selling/search')) return json(response, 200, await services.fastSelling.list(searchParams), corsHeaders)
+      if (request.method === 'GET' && pathname === '/api/fast-selling/featured') { searchParams.set('featured', 'true'); return json(response, 200, await services.fastSelling.list(searchParams), corsHeaders) }
+      if (request.method === 'GET' && pathname === '/api/fast-selling/categories') return json(response, 200, { data: await services.fastSelling.categories() }, corsHeaders)
+      if (request.method === 'GET' && pathname === '/api/fast-selling/sellers') return json(response, 200, { data: await services.fastSelling.sellers() }, corsHeaders)
+      if ((params = match(pathname, /^\/api\/fast-selling\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.fastSelling.get(params[0]) }, corsHeaders)
+      if (request.method === 'GET' && (pathname === '/api/sellers/promotions' || pathname === '/api/sellers/promotions/search')) return json(response, 200, await services.sellerPromotions.list(searchParams), corsHeaders)
+      if (request.method === 'GET' && pathname === '/api/sellers/promotions/featured') { searchParams.set('featured', 'true'); return json(response, 200, await services.sellerPromotions.list(searchParams), corsHeaders) }
+      if (request.method === 'GET' && pathname === '/api/sellers/promotions/categories') return json(response, 200, { data: await services.sellerPromotions.categories() }, corsHeaders)
+      if (request.method === 'GET' && pathname === '/api/sellers/promotions/sellers') return json(response, 200, { data: await services.sellerPromotions.sellers() }, corsHeaders)
+      if ((params = match(pathname, /^\/api\/sellers\/promotions\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.sellerPromotions.get(params[0]) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/auctions') return json(response, 200, await services.auctions.list(searchParams, user), corsHeaders)
       if (request.method === 'GET' && pathname === '/api/auctions/featured') return json(response, 200, { data: await services.auctions.featured(user) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/auctions/upcoming') { searchParams.set('status', 'upcoming'); return json(response, 200, await services.auctions.list(searchParams, user), corsHeaders) }
       if (request.method === 'GET' && pathname === '/api/auctions/history') return json(response, 200, await services.auctions.history(searchParams, user), corsHeaders)
       if (request.method === 'GET' && pathname === '/api/auctions/watchlist') return json(response, 200, { data: await services.auctions.watchlist(user) }, corsHeaders)
-      if (request.method === 'POST' && pathname === '/api/auctions/watchlist') return json(response, 201, { data: await services.auctions.watch(await readJson(request), user) }, corsHeaders)
-      if ((params = match(pathname, /^\/api\/auctions\/watchlist\/([^/]+)$/)) && request.method === 'DELETE') return json(response, 200, { data: await services.auctions.unwatch(params[0], user) }, corsHeaders)
+      if (request.method === 'POST' && pathname === '/api/auctions/watchlist') { if (!user.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to manage your auction watchlist'); return json(response, 201, { data: await services.auctions.watch(await readJson(request), user) }, corsHeaders) }
+      if ((params = match(pathname, /^\/api\/auctions\/watchlist\/([^/]+)$/)) && request.method === 'DELETE') { if (!user.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to manage your auction watchlist'); return json(response, 200, { data: await services.auctions.unwatch(params[0], user) }, corsHeaders) }
       if ((params = match(pathname, /^\/api\/auctions\/([^/]+)\/bids$/))) {
         if (request.method === 'GET') return json(response, 200, await services.auctions.bids(params[0], searchParams, user), corsHeaders)
-        if (request.method === 'POST') return json(response, 201, { data: await services.auctions.placeBid(params[0], await readJson(request), user) }, corsHeaders)
+        if (request.method === 'POST') { if (!user.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to place a bid'); return json(response, 201, { data: await services.auctions.placeBid(params[0], await readJson(request), user) }, corsHeaders) }
       }
       if ((params = match(pathname, /^\/api\/auctions\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.auctions.get(params[0], user) }, corsHeaders)
+      if (request.method === 'GET' && pathname === '/api/auction-listings') return json(response, 200, await services.auctionListings.list(searchParams, user), corsHeaders)
+      if (request.method === 'POST' && pathname === '/api/auction-listings') return json(response, 201, { data: await services.auctionListings.create(await readJson(request), user) }, corsHeaders)
+      if (request.method === 'POST' && pathname === '/api/auction-listings/upload') return json(response, 201, { data: await services.auctionListings.upload(await readJson(request), user) }, corsHeaders)
+      if ((params = match(pathname, /^\/api\/auction-listings\/([^/]+)\/preview$/)) && request.method === 'GET') return json(response, 200, { data: await services.auctionListings.preview(params[0], user) }, corsHeaders)
+      if ((params = match(pathname, /^\/api\/auction-listings\/([^/]+)\/publish$/)) && request.method === 'POST') return json(response, 200, { data: await services.auctionListings.publish(params[0], user) }, corsHeaders)
+      if ((params = match(pathname, /^\/api\/auction-listings\/([^/]+)$/))) {
+        if (request.method === 'GET') return json(response, 200, { data: await services.auctionListings.get(params[0], user) }, corsHeaders)
+        if (request.method === 'PUT' || request.method === 'PATCH' || request.method === 'POST') return json(response, 200, { data: await services.auctionListings.update(params[0], await readJson(request), user) }, corsHeaders)
+        if (request.method === 'DELETE') return json(response, 200, { data: await services.auctionListings.remove(params[0], user) }, corsHeaders)
+      }
 
       if (request.method === 'GET' && (pathname === '/api/cart' || pathname === '/api/cart/summary')) return json(response, 200, { data: await services.cart.get(user) }, corsHeaders)
       if (request.method === 'POST' && pathname === '/api/cart/items') return json(response, 201, { data: await services.cart.add(await readJson(request), user) }, corsHeaders)
