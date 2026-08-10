@@ -50,7 +50,14 @@ export const seedData = {
     { id: 'prod-accent-chair', title: 'Modern Artisan Accent Chair', categoryId: 'furniture', image: '/assets/featured-3.png', price: 3400000, currency: 'IDR', rating: 5, discountPercent: 70, soldCount: 17000, featured: true },
     { id: 'prod-ceramic-vase', title: 'Artistic Ceramic Vase', categoryId: 'home-decoration', image: '/assets/product-2.jpeg', price: 1000000, currency: 'IDR', rating: 4.8, discountPercent: 15, soldCount: 830, featured: false },
     { id: 'prod-table-lamp', title: 'Artisan Mushroom Table Lamp', categoryId: 'home-decoration', image: '/assets/product-1.jpeg', price: 1800000, currency: 'IDR', rating: 4.9, discountPercent: 20, soldCount: 4200, featured: true },
-  ].map((product) => ({ ...product, active: true, createdAt: now, updatedAt: now })),
+  ].map((product) => ({ ...product, description: 'A distinctive Indonesian-made piece created for considered commercial and residential spaces.', images: [product.image, '/assets/product-1.jpeg', '/assets/product-2.jpeg', '/assets/product-3.jpeg'], minimumOrder: 10, shipping: ['Air Freight', 'Sea Freight'], customization: true, warranty: false, material: 'Wood · FNP · Rustic', dimensions: '215 cm × 90 cm × 165 cm', weight: '54 Kgs', impactTags: ['Heritage Craft', 'Eco Materials', 'Sustainable Design', 'Innovation', 'Woman Led'], active: true, createdAt: now, updatedAt: now })),
+  productQuotes: [],
+  buyingPools: [
+    { id: 'pool-kemang-cleaning', title: 'Kemang Hospitality Essentials', description: 'Restaurants and cafés combining recurring orders for cleaning and service supplies.', industry: 'restaurants-cafes', location: 'Kemang, Jakarta', productId: 'prod-bamboo-table', supplierId: 'seller-sari', targetBusinesses: 10, baseParticipants: 6, groupPrice: 1125000, minimumQuantity: 10, status: 'open', startTime: '2026-08-01T00:00:00.000Z', endTime: '2027-01-31T23:59:59.000Z', image: '/assets/review-1.png', createdAt: now, updatedAt: now },
+    { id: 'pool-bali-fitness', title: 'Bali Fitness Studio Refresh', description: 'Independent gyms pooling their furniture and wellness-area requirements for better volume pricing.', industry: 'gyms-fitness', location: 'Bali, Indonesia', productId: 'prod-accent-chair', supplierId: 'seller-sari', targetBusinesses: 10, baseParticipants: 6, groupPrice: 2380000, minimumQuantity: 12, status: 'open', startTime: '2026-08-01T00:00:00.000Z', endTime: '2027-02-15T23:59:59.000Z', image: '/assets/review-2.png', createdAt: now, updatedAt: now },
+    { id: 'pool-hotel-lobby', title: 'Boutique Hotel Lobby Collection', description: 'Boutique hotels sourcing a coordinated lobby collection from verified Indonesian makers.', industry: 'hotels-hospitality', location: 'Ubud, Bali', productId: 'prod-stone-table', supplierId: 'seller-sari', targetBusinesses: 12, baseParticipants: 8, groupPrice: 900000, minimumQuantity: 12, status: 'almost-full', startTime: '2026-08-01T00:00:00.000Z', endTime: '2027-01-20T23:59:59.000Z', image: '/assets/review-3.png', createdAt: now, updatedAt: now },
+  ],
+  buyingPoolParticipants: [],
   flashSales: [
     { id: 'flash-sustainable-living', title: 'Sustainable Living Event', description: 'Limited-time prices on thoughtful furniture made for modern spaces.', featured: true, startTime: '2026-08-01T00:00:00.000Z', endTime: '2027-01-31T23:59:59.000Z', products: [{ productId: 'prod-bamboo-table', salePrice: 750000, remainingStock: 18 }, { productId: 'prod-stone-table', salePrice: 840000, remainingStock: 11 }] },
     { id: 'flash-artisan-edit', title: 'The Artisan Edit', description: 'Small-batch statement pieces at exceptional event pricing.', featured: true, startTime: '2026-08-05T00:00:00.000Z', endTime: '2026-12-15T23:59:59.000Z', products: [{ productId: 'prod-accent-chair', salePrice: 1020000, remainingStock: 7 }, { productId: 'prod-table-lamp', salePrice: 1440000, remainingStock: 22 }] },
@@ -132,6 +139,7 @@ export const seedData = {
     { id: 'faq-shipping', question: 'Where does Buyamia ship?', answer: 'Our marketplace supports international sourcing. Delivery options are confirmed with your supplier.', categoryId: 'shipping' },
   ],
   supportTickets: [],
+  feedbackSubmissions: [],
   accountSecurity: [],
   shippingAddresses: [],
   bankAccounts: [],

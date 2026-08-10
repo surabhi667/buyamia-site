@@ -144,13 +144,20 @@ export function createServices(store, environment = process.env) {
       rows = rows.filter((product) => (!tokens.length || tokens.every((token) => normalizeSearch(`${product.title} ${product.description || ''} ${product.subcategory} ${product.styles.join(' ')} ${product.supplier?.name || ''}`).includes(token))) && (!subcategory || product.subcategory.toLowerCase() === subcategory.toLowerCase()) && (!room || product.room.toLowerCase() === room.toLowerCase()) && (premium === null || product.premium === (premium === 'true')) && (minPrice === null || product.price >= minPrice) && (maxPrice === null || product.price <= maxPrice) && (!selections.style.length || selections.style.some((value) => product.styles.some((item) => item.toLowerCase() === value.toLowerCase()))) && (!selections.mood.length || selections.mood.some((value) => product.moods.some((item) => item.toLowerCase() === value.toLowerCase()))) && (!selections.color.length || selections.color.some((value) => product.colors.some((item) => item.toLowerCase() === value.toLowerCase()))))
       const sorters = { featured: (a,b) => Number(b.featured)-Number(a.featured), popular: (a,b) => b.reviewCount-a.reviewCount || b.rating-a.rating, 'best-selling': (a,b) => b.soldCount-a.soldCount, rating: (a,b) => b.rating-a.rating, newest: newestFirst, price_asc: (a,b) => a.price-b.price, price_desc: (a,b) => b.price-a.price, alphabetical: (a,b) => a.title.localeCompare(b.title) }; rows.sort(sorters[sort]); const result = paginate(rows, query); return { category, products: result.data, data: result.data, meta: result.meta, availableFilters: available, selectedFilters: { search: q, subcategory: subcategory || null, styles: selections.style, moods: selections.mood, room: room || null, colors: selections.color, minPrice, maxPrice, premium: premium === null ? null : premium === 'true' }, sorting: { selected: sort, options: available.sorting } }
     },
-    async create(body) {
+    async create(body, user) {
+      if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in with a supplier account to create a category')
+      const supplier = (await store.read('sellerProfiles')).find((item) => item.userId === user.id && item.verificationStatus === 'approved')
+      if (!supplier) throw new ApiError(403, 'SUPPLIER_REQUIRED', 'An approved supplier account is required to create a category')
       const name = text(body.name, 'name', { max: 80 })
       const slug = text(body.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), 'slug', { max: 100 })
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) throw new ApiError(400, 'VALIDATION_ERROR', 'slug must contain lowercase letters, numbers, and single hyphens')
+      const description = text(body.description, 'description', { max: 500, required: false }) || null
+      const parentCategoryId = text(body.parentCategoryId, 'parentCategoryId', { max: 120, required: false }) || null
       return store.mutate((db) => {
-        if (db.categories.some((item) => item.slug === slug)) throw new ApiError(409, 'CATEGORY_EXISTS', 'A category with this slug already exists')
+        if (db.categories.some((item) => item.slug === slug || item.name.toLowerCase() === name.toLowerCase())) throw new ApiError(409, 'CATEGORY_EXISTS', 'A category with this name or slug already exists')
+        if (parentCategoryId && !db.categories.some((item) => item.id === parentCategoryId && item.active)) throw new ApiError(404, 'PARENT_CATEGORY_NOT_FOUND', 'Parent category not found')
         const timestamp = new Date().toISOString()
-        const category = { id: store.id('category'), name, slug, children: Array.isArray(body.children) ? body.children.map((child) => text(child, 'children item', { max: 80 })) : [], position: db.categories.length + 1, active: true, createdAt: timestamp, updatedAt: timestamp }
+        const category = { id: slug, name, slug, description, parentCategoryId, supplierId: supplier.id, children: [], position: db.categories.length + 1, active: true, createdAt: timestamp, updatedAt: timestamp }
         db.categories.push(category)
         return category
       })
@@ -179,6 +186,35 @@ export function createServices(store, environment = process.env) {
     },
   }
 
+  const products = {
+    async detail(id) {
+      const [items, categoryRows, brandRows, profiles, aboutPage] = await Promise.all([store.read('products'), store.read('categories'), store.read('brands'), store.read('sellerProfiles'), store.read('aboutPage')])
+      const product = items.find((item) => item.id === id && item.active)
+      if (!product) throw new ApiError(404, 'PRODUCT_NOT_FOUND', 'Product not found')
+      const detailed = { ...product, description: product.description || 'A distinctive Indonesian-made piece created for considered commercial and residential spaces.', images: product.images?.length ? product.images : [product.image, '/assets/product-1.jpeg', '/assets/product-2.jpeg', '/assets/product-3.jpeg'], minimumOrder: product.minimumOrder || 10, shipping: product.shipping?.length ? product.shipping : ['Air Freight', 'Sea Freight'], customization: product.customization ?? true, warranty: product.warranty ?? false, material: product.material || 'Wood · FNP · Rustic', dimensions: product.dimensions || '215 cm × 90 cm × 165 cm', weight: product.weight || '54 Kgs', impactTags: product.impactTags?.length ? product.impactTags : ['Heritage Craft', 'Eco Materials', 'Sustainable Design', 'Innovation', 'Woman Led'] }
+      const category = categoryRows.find((item) => item.id === product.categoryId)
+      const brand = brandRows.find((item) => item.productIds?.includes(product.id))
+      const profile = profiles.find((item) => item.id === product.supplierId || item.userId === product.supplierId) || profiles.find((item) => item.verificationStatus === 'approved')
+      const seller = brand ? { id: brand.id, name: brand.name, location: brand.country, description: brand.description, verified: brand.verified } : profile ? { id: profile.id, name: profile.displayName, location: profile.businessAddress?.country || 'Indonesia', description: profile.description || 'Verified Indonesian maker supplying thoughtfully made products.', verified: profile.verificationStatus === 'approved' } : { id: 'buyamia-maker', name: 'Buyamia Maker', location: 'Indonesia', description: 'Verified Indonesian maker supplying thoughtfully made products.', verified: true }
+      const related = items.filter((item) => item.active && item.id !== product.id && item.categoryId === product.categoryId)
+      const recommendations = [...related, ...items.filter((item) => item.active && item.id !== product.id && item.categoryId !== product.categoryId)].slice(0, 4)
+      return { ...detailed, category: category || null, seller, relatedProducts: recommendations, collectionProducts: recommendations.slice(0, 2), bundles: [...items.filter((item) => item.active && item.id !== product.id)].slice(0, 4), confidence: aboutPage.confidence.cards, information: { general: 'Discover exceptional products on Buyamia, the leading B2B marketplace for sourcing unique and high-quality goods from Indonesia. Every product is carefully presented to support transparent, confident purchasing decisions.', product: detailed.description, shipping: `Available shipping options: ${detailed.shipping.join(' and ')}. Final delivery pricing and timing are confirmed with your quote.` } }
+    },
+    async requestQuote(id, body, user) {
+      const product = (await store.read('products')).find((item) => item.id === id && item.active)
+      if (!product) throw new ApiError(404, 'PRODUCT_NOT_FOUND', 'Product not found')
+      const quantity = Number(body.quantity)
+      const minimumOrder = product.minimumOrder || 10
+      if (!Number.isInteger(quantity) || quantity < minimumOrder) throw new ApiError(400, 'INVALID_QUANTITY', `quantity must be an integer of at least ${minimumOrder}`)
+      const note = text(body.note, 'note', { max: 1000, required: false }) || null
+      return store.mutate((db) => {
+        const quote = { id: store.id('product-quote'), productId: product.id, userId: user?.authenticated ? user.id : null, quantity, note, status: 'requested', createdAt: new Date().toISOString() }
+        db.productQuotes.push(quote)
+        return quote
+      })
+    },
+  }
+
   const marketplace = {
     async products(query) {
       const search = (query.get('search') || '').trim().toLowerCase()
@@ -202,8 +238,38 @@ export function createServices(store, environment = process.env) {
       const [flashSales, fastSelling, sellerPromotions, auctions] = await Promise.all(['flash-sales', 'fast-selling', 'seller-promotions', 'auctions'].map((name) => this.widget(name, query)))
       return { flashSales, fastSelling, sellerPromotions, auctions }
     },
-    async marketplaces() { return (await store.read('marketplaces')).filter((item) => item.active) },
-    async marketplaceOverview(id = 'vehicles') { const definition = (await store.read('marketplaces')).find((item) => item.id === id && item.active); if (!definition) throw new ApiError(404, 'MARKETPLACE_NOT_FOUND', 'Marketplace not found'); const emptyQuery = new URLSearchParams('limit=8'); const featured = await this.marketplaceProducts(new URLSearchParams(`marketplace=${encodeURIComponent(id)}&featured=true&limit=8`)); const trending = await this.marketplaceProducts(new URLSearchParams(`marketplace=${encodeURIComponent(id)}&sort=popular&limit=8`)); return { ...definition, featured: featured.data, trending: trending.data, sellers: await this.marketplaceSellers(id), recommendations: (await this.marketplaceProducts(emptyQuery)).data.slice(0, 4) } },
+    async marketplaces() { const [definitions, listings] = await Promise.all([store.read('marketplaces'), store.read('marketplaceListings')]); return definitions.filter((item) => item.active).map((item) => ({ id: item.id, name: item.name, title: item.title, description: item.description, category: item.categories?.[0]?.id || item.id, image: item.image || item.categories?.[0]?.image || listings.find((listing) => listing.marketplaceId === item.id)?.images?.[0] || null, route: `/marketplaces/${item.id}`, status: 'available', supplierId: item.supplierId || null, categoryCount: item.categories?.length || 0, listingCount: listings.filter((listing) => listing.marketplaceId === item.id && listing.available).length })) },
+    async createMarketplace(body, user) {
+      if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in with a supplier account to create a marketplace')
+      const profile = (await store.read('sellerProfiles')).find((item) => item.userId === user.id && item.verificationStatus === 'approved')
+      if (!profile) throw new ApiError(403, 'SUPPLIER_REQUIRED', 'An approved supplier account is required to create a marketplace')
+      const name = text(body.name, 'name', { min: 3, max: 100 })
+      const description = text(body.description, 'description', { min: 10, max: 1000 })
+      const categoryId = text(body.categoryId, 'categoryId', { max: 120 })
+      const image = text(body.image, 'image', { max: 1000, required: false }) || null
+      const category = (await store.read('categories')).find((item) => item.id === categoryId && item.active)
+      if (!category) throw new ApiError(404, 'CATEGORY_NOT_FOUND', 'Marketplace category not found')
+      const id = name.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+      if (!id) throw new ApiError(400, 'VALIDATION_ERROR', 'Marketplace name must contain letters or numbers')
+      return store.mutate((db) => {
+        if (db.marketplaces.some((item) => item.id === id || item.name.toLowerCase() === name.toLowerCase())) throw new ApiError(409, 'MARKETPLACE_ALREADY_EXISTS', 'A marketplace with this name already exists')
+        const timestamp = new Date().toISOString()
+        const marketplace = { id, name, title: name, eyebrow: 'Supplier marketplace', description, heroPrompt: `Ask Amia about ${name}`, suggestions: [], categories: [{ id: category.id, name: category.name, image: image || '/assets/category-bg.png' }], image: image || '/assets/category-bg.png', supplierId: profile.id, ownerUserId: user.id, active: true, status: 'active', createdAt: timestamp, updatedAt: timestamp }
+        db.marketplaces.push(marketplace)
+        return { ...marketplace, route: `/marketplaces/${id}` }
+      })
+    },
+    async marketplaceOverview(id = 'vehicles') {
+      const definition = (await store.read('marketplaces')).find((item) => item.id === id && item.active)
+      if (!definition) throw new ApiError(404, 'MARKETPLACE_NOT_FOUND', 'Marketplace not found')
+      if (id !== 'vehicles') {
+        const categoryIds = new Set((definition.categories || []).map((item) => item.id))
+        const products = (await store.read('products')).filter((item) => item.active && categoryIds.has(item.categoryId))
+        const supplier = (await store.read('sellerProfiles')).find((item) => item.id === definition.supplierId)
+        return { ...definition, products, featured: products.filter((item) => item.featured).slice(0, 8), trending: [...products].sort((a, b) => b.soldCount - a.soldCount).slice(0, 8), recommendations: products.slice(0, 4), sellers: supplier ? [{ id: supplier.id, name: supplier.displayName, location: supplier.location, verified: true }] : [] }
+      }
+      const emptyQuery = new URLSearchParams('limit=8'); const featured = await this.marketplaceProducts(new URLSearchParams(`marketplace=${encodeURIComponent(id)}&featured=true&limit=8`)); const trending = await this.marketplaceProducts(new URLSearchParams(`marketplace=${encodeURIComponent(id)}&sort=popular&limit=8`)); return { ...definition, featured: featured.data, trending: trending.data, sellers: await this.marketplaceSellers(id), recommendations: (await this.marketplaceProducts(emptyQuery)).data.slice(0, 4) }
+    },
     async marketplaceProducts(query) {
       const marketplaceId = query.get('marketplace') || 'vehicles'; const q = text(query.get('q') || query.get('search'), 'search', { max: 160, required: false })?.toLowerCase(); const category = query.get('category') || query.get('type'); const sellerId = query.get('seller'); const country = text(query.get('country'), 'country', { max: 100, required: false }); const sort = query.get('sort') || 'featured'; const featured = query.get('featured'); const minPrice = query.get('minPrice') === null ? null : Number(query.get('minPrice')); const maxPrice = query.get('maxPrice') === null ? null : Number(query.get('maxPrice')); const rawPage = query.get('page'); const rawLimit = query.get('limit')
       if (!(await store.read('marketplaces')).some((item) => item.id === marketplaceId && item.active)) throw new ApiError(404, 'MARKETPLACE_NOT_FOUND', 'Marketplace not found'); if (category && !['cars','bikes'].includes(category)) throw new ApiError(400, 'VALIDATION_ERROR', 'category is not supported'); if (sellerId && !(await store.read('marketplaceDealers')).some((item) => item.id === sellerId && item.marketplaceId === marketplaceId)) throw new ApiError(404, 'SELLER_NOT_FOUND', 'Marketplace seller not found'); if (featured !== null && !['true','false'].includes(featured)) throw new ApiError(400, 'VALIDATION_ERROR', 'featured must be true or false'); if ((minPrice !== null && (!Number.isFinite(minPrice) || minPrice < 0)) || (maxPrice !== null && (!Number.isFinite(maxPrice) || maxPrice < 0)) || (minPrice !== null && maxPrice !== null && minPrice > maxPrice)) throw new ApiError(400, 'VALIDATION_ERROR', 'price range is invalid'); if (!['featured','popular','newest','price-asc','price-desc','mileage'].includes(sort)) throw new ApiError(400, 'VALIDATION_ERROR', 'sort is not supported'); if (rawPage !== null && (!/^\d+$/.test(rawPage) || Number(rawPage) < 1)) throw new ApiError(400, 'VALIDATION_ERROR', 'page must be a positive integer'); if (rawLimit !== null && (!/^\d+$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 100)) throw new ApiError(400, 'VALIDATION_ERROR', 'limit must be between 1 and 100')
@@ -213,7 +279,61 @@ export function createServices(store, environment = process.env) {
     async marketplaceSellers(id = 'vehicles') { const listings = await store.read('marketplaceListings'); return (await store.read('marketplaceDealers')).filter((item) => item.marketplaceId === id && item.approved).map((item) => ({ ...item, products: item.listingIds.map((listingId) => listings.find((listing) => listing.id === listingId && listing.available)).filter(Boolean) })) },
   }
 
+  function buyingPoolStatus(pool, participantCount) {
+    if (pool.status === 'draft') return 'draft'
+    if (pool.status === 'cancelled') return 'cancelled'
+    const now = Date.now(); const start = new Date(pool.startTime).getTime(); const end = new Date(pool.endTime).getTime()
+    if (now < start) return 'upcoming'
+    if (now >= end) return 'expired'
+    if (participantCount >= pool.targetBusinesses) return 'full'
+    if (participantCount >= Math.ceil(pool.targetBusinesses * 0.75)) return 'almost-full'
+    return 'open'
+  }
+
+  async function buyingPoolRows(user) {
+    const [pools, participants, products, profiles] = await Promise.all(['buyingPools', 'buyingPoolParticipants', 'products', 'sellerProfiles'].map((name) => store.read(name)))
+    return pools.map((pool) => {
+      const joins = participants.filter((item) => item.poolId === pool.id); const participantCount = pool.baseParticipants + joins.length; const product = products.find((item) => item.id === pool.productId); const supplier = profiles.find((item) => item.id === pool.supplierId)
+      return { ...pool, status: buyingPoolStatus(pool, participantCount), participantCount, remainingPlaces: Math.max(0, pool.targetBusinesses - participantCount), progressPercent: Math.min(100, Math.round(participantCount / pool.targetBusinesses * 100)), joined: Boolean(user?.authenticated && joins.some((item) => item.userId === user.id)), product: product ? { id: product.id, title: product.title, image: product.image, originalPrice: product.price, currency: product.currency, rating: product.rating } : null, supplier: supplier ? { id: supplier.id, name: supplier.displayName, verified: supplier.verificationStatus === 'approved' } : null }
+    })
+  }
+
+  const buyingPools = {
+    async list(query, user) {
+      const q = text(query.get('q') || query.get('search'), 'search', { max: 160, required: false })?.toLowerCase(); const industry = query.get('industry'); const status = query.get('status') || 'current'; const sort = query.get('sort') || 'filling-fast'
+      const industries = ['restaurants-cafes', 'bars-nightlife', 'hotels-hospitality', 'gyms-fitness', 'clinics-healthcare', 'salons-spas', 'retail-boutiques']
+      if (industry && !industries.includes(industry)) throw new ApiError(400, 'VALIDATION_ERROR', 'industry is not supported')
+      if (!['current', 'all', 'open', 'almost-full', 'full', 'upcoming', 'expired'].includes(status)) throw new ApiError(400, 'VALIDATION_ERROR', 'status is not supported')
+      if (!['filling-fast', 'ending-soon', 'newest', 'title'].includes(sort)) throw new ApiError(400, 'VALIDATION_ERROR', 'sort is not supported')
+      let rows = (await buyingPoolRows(user)).filter((pool) => pool.status !== 'draft' && (status === 'all' || (status === 'current' ? ['open', 'almost-full'].includes(pool.status) : pool.status === status)) && (!industry || pool.industry === industry) && (!q || `${pool.title} ${pool.description} ${pool.location} ${pool.product?.title || pool.productName || ''}`.toLowerCase().includes(q)))
+      const sorters = { 'filling-fast': (a, b) => b.progressPercent - a.progressPercent, 'ending-soon': (a, b) => new Date(a.endTime) - new Date(b.endTime), newest: newestFirst, title: (a, b) => a.title.localeCompare(b.title) }; rows.sort(sorters[sort])
+      return paginate(rows, query)
+    },
+    async get(id, user) { const pool = (await buyingPoolRows(user)).find((item) => item.id === id && (item.status !== 'draft' || (user?.authenticated && item.createdBy === user.id))); if (!pool) throw new ApiError(404, 'BUYING_POOL_NOT_FOUND', 'Buying Pool not found'); return pool },
+    async industries() { return [{ id: 'restaurants-cafes', name: 'Restaurants & Cafés' }, { id: 'bars-nightlife', name: 'Bars & Nightlife' }, { id: 'hotels-hospitality', name: 'Hotels & Hospitality' }, { id: 'gyms-fitness', name: 'Gyms & Fitness Studios' }, { id: 'clinics-healthcare', name: 'Clinics & Healthcare' }, { id: 'salons-spas', name: 'Salons & Spas' }, { id: 'retail-boutiques', name: 'Retail & Boutiques' }] },
+    async join(id, user) {
+      if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to join a Buying Pool')
+      return store.mutate((db) => { const pool = db.buyingPools.find((item) => item.id === id); if (!pool) throw new ApiError(404, 'BUYING_POOL_NOT_FOUND', 'Buying Pool not found'); const count = pool.baseParticipants + db.buyingPoolParticipants.filter((item) => item.poolId === id).length; const status = buyingPoolStatus(pool, count); if (!['open', 'almost-full'].includes(status)) throw new ApiError(409, 'BUYING_POOL_CLOSED', 'This Buying Pool is no longer accepting participants'); if (db.buyingPoolParticipants.some((item) => item.poolId === id && item.userId === user.id)) throw new ApiError(409, 'ALREADY_JOINED', 'You have already joined this Buying Pool'); const participation = { id: store.id('pool-participant'), poolId: id, userId: user.id, joinedAt: new Date().toISOString() }; db.buyingPoolParticipants.push(participation); return participation })
+    },
+    async create(body, user) {
+      if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to start a Buying Pool')
+      const productName = text(body.productName, 'productName', { min: 2, max: 120 }); const preferredSupplier = text(body.preferredSupplier, 'preferredSupplier', { max: 120, required: false }) || null; const frequency = text(body.frequency, 'frequency', { max: 30 }); const location = text(body.location, 'location', { min: 2, max: 160 }); const matchingRadius = text(body.matchingRadius, 'matchingRadius', { max: 40 }); const industryMatching = text(body.industryMatching, 'industryMatching', { max: 60 }); const monitoring = text(body.monitoring, 'monitoring', { max: 220, required: false }) || null
+      const orderQuantity = Number(body.orderQuantity); const minimumBusinesses = Number(body.minimumBusinesses); const maximumBusinesses = body.maximumBusinesses === null || body.maximumBusinesses === '' || body.maximumBusinesses === undefined ? null : Number(body.maximumBusinesses); const targetVolume = Number(body.targetVolume); const poolWindowDays = Number(body.poolWindowDays)
+      if (![orderQuantity, minimumBusinesses, targetVolume, poolWindowDays].every(Number.isSafeInteger) || orderQuantity < 1 || minimumBusinesses < 2 || targetVolume < 1 || ![7, 14, 30].includes(poolWindowDays)) throw new ApiError(400, 'VALIDATION_ERROR', 'Quantities, minimum businesses, target volume, and pool window are invalid')
+      if (maximumBusinesses !== null && (!Number.isSafeInteger(maximumBusinesses) || maximumBusinesses < minimumBusinesses)) throw new ApiError(400, 'VALIDATION_ERROR', 'maximumBusinesses must be at least the minimum number of businesses')
+      if (!['weekly', 'monthly', 'quarterly'].includes(frequency)) throw new ApiError(400, 'VALIDATION_ERROR', 'frequency is not supported')
+      if (!['neighborhood', 'city', 'unlimited'].includes(matchingRadius)) throw new ApiError(400, 'VALIDATION_ERROR', 'matchingRadius is not supported')
+      if (!['same-industry', 'compatible'].includes(industryMatching)) throw new ApiError(400, 'VALIDATION_ERROR', 'industryMatching is not supported')
+      if (body.publish !== undefined && typeof body.publish !== 'boolean') throw new ApiError(400, 'VALIDATION_ERROR', 'publish must be a boolean')
+      const timestamp = new Date().toISOString(); const endTime = new Date(Date.now() + poolWindowDays * 86400000).toISOString(); const status = body.publish === true ? 'open' : 'draft'
+      return store.mutate((db) => { const pool = { id: store.id('pool'), title: `${productName} Buying Pool`, description: `${frequency[0].toUpperCase()}${frequency.slice(1)} collective order for ${productName}.`, productName, preferredSupplier, industry: 'custom', location, productId: null, supplierId: null, targetBusinesses: maximumBusinesses || minimumBusinesses, minimumBusinesses, maximumBusinesses, baseParticipants: 1, groupPrice: null, minimumQuantity: orderQuantity, orderQuantity, targetVolume, frequency, matchingRadius, industryMatching, poolWindowDays, monitoring, status, createdBy: user.id, startTime: timestamp, endTime, image: '/assets/carved-bg.png', createdAt: timestamp, updatedAt: timestamp, publishedAt: status === 'open' ? timestamp : null }; db.buyingPools.push(pool); return pool })
+    },
+    async mine(user) { if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to view your Buying Pools'); return (await buyingPoolRows(user)).filter((item) => item.createdBy === user.id).sort(newestFirst) },
+  }
+
   function flashSaleStatus(sale) {
+    if (sale.publicationStatus === 'draft') return 'draft'
+    if (sale.publicationStatus === 'cancelled') return 'cancelled'
     const now = Date.now()
     if (now < new Date(sale.startTime).getTime()) return 'upcoming'
     if (now >= new Date(sale.endTime).getTime()) return 'expired'
@@ -233,8 +353,38 @@ export function createServices(store, environment = process.env) {
         return { ...product, description: product.description || `${product.title}, selected for a limited-time Buyamia event.`, originalPrice: product.price, salePrice: entry.salePrice, discountPercent: Math.round((1 - entry.salePrice / product.price) * 100), remainingStock: entry.remainingStock, availability: status !== 'expired' && entry.remainingStock > 0, seller: seller ? { id: seller.id, name: seller.name, verified: seller.verified } : null, category: categoryById.get(product.categoryId) || null, reviewCount: product.reviewCount || Math.max(1, Math.round(product.soldCount / 1000)), verificationBadge: seller?.verified ? 'Verified seller' : null }
       }).filter(Boolean)
       const end = new Date(sale.endTime).getTime(); const start = new Date(sale.startTime).getTime()
-      return { ...sale, status, remainingMs: status === 'active' ? Math.max(0, end - Date.now()) : 0, startsInMs: status === 'upcoming' ? Math.max(0, start - Date.now()) : 0, products: saleProducts, productCount: saleProducts.length, categories: [...new Set(saleProducts.map((item) => item.categoryId))] }
+      const managementStatus = status === 'upcoming' ? 'scheduled' : status === 'expired' ? 'ended' : status
+      return { ...sale, status, managementStatus, remainingMs: status === 'active' ? Math.max(0, end - Date.now()) : 0, startsInMs: status === 'upcoming' ? Math.max(0, start - Date.now()) : 0, products: saleProducts, productCount: saleProducts.length, categories: [...new Set(saleProducts.map((item) => item.categoryId))] }
     })
+  }
+
+  async function flashSaleSupplier(user) {
+    if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in with a supplier account to manage flash sales')
+    const profiles = await store.read('sellerProfiles')
+    const profile = profiles.find((item) => item.userId === user.id && item.verificationStatus === 'approved')
+    if (!profile) throw new ApiError(403, 'SUPPLIER_REQUIRED', 'An approved supplier account is required to manage flash sales')
+    const brand = (await store.read('brands')).find((item) => item.id === profile.brandId)
+    if (!brand) throw new ApiError(403, 'SUPPLIER_CATALOG_REQUIRED', 'The supplier does not have an available product catalog')
+    return { profile, brand }
+  }
+
+  async function flashSaleValues(body, user, existing = null) {
+    const { profile, brand } = await flashSaleSupplier(user)
+    const productId = text(body.productId ?? existing?.products?.[0]?.productId, 'productId', { max: 120 })
+    const product = (await store.read('products')).find((item) => item.id === productId && item.active)
+    if (!product) throw new ApiError(404, 'PRODUCT_NOT_FOUND', 'The selected product was not found')
+    if (!brand.productIds.includes(productId)) throw new ApiError(403, 'PRODUCT_NOT_OWNED', 'The selected product is not part of this supplier catalog')
+    const title = text(body.title ?? existing?.title, 'title', { min: 3, max: 120 })
+    const description = text(body.description ?? existing?.description, 'description', { min: 10, max: 1000 })
+    const salePrice = Number(body.salePrice ?? existing?.products?.[0]?.salePrice)
+    const remainingStock = Number(body.remainingStock ?? existing?.products?.[0]?.remainingStock)
+    if (!Number.isSafeInteger(salePrice) || salePrice < 1 || salePrice >= product.price) throw new ApiError(400, 'INVALID_SALE_PRICE', 'salePrice must be a positive whole number below the original product price')
+    if (!Number.isSafeInteger(remainingStock) || remainingStock < 1 || remainingStock > (product.stock || 1000000)) throw new ApiError(400, 'INVALID_FLASH_SALE_STOCK', 'remainingStock must be a positive whole number within available stock')
+    const startTime = new Date(body.startTime ?? existing?.startTime)
+    const endTime = new Date(body.endTime ?? existing?.endTime)
+    if (Number.isNaN(startTime.getTime())) throw new ApiError(400, 'INVALID_START_TIME', 'startTime must be a valid date and time')
+    if (Number.isNaN(endTime.getTime()) || endTime <= startTime) throw new ApiError(400, 'INVALID_END_TIME', 'endTime must be a valid date after startTime')
+    return { profile, title, description, startTime: startTime.toISOString(), endTime: endTime.toISOString(), products: [{ productId, salePrice, remainingStock }] }
   }
 
   const flashSales = {
@@ -247,12 +397,40 @@ export function createServices(store, environment = process.env) {
       if (rawPage !== null && (!/^\d+$/.test(rawPage) || Number(rawPage) < 1)) throw new ApiError(400, 'VALIDATION_ERROR', 'page must be a positive integer')
       if (rawLimit !== null && (!/^\d+$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 100)) throw new ApiError(400, 'VALIDATION_ERROR', 'limit must be between 1 and 100')
       if (category && !(await store.read('categories')).some((item) => item.id === category && item.active)) throw new ApiError(404, 'CATEGORY_NOT_FOUND', 'Flash sale category not found')
-      let rows = (await flashSaleRows()).filter((sale) => (status === 'all' || (status === 'current' ? sale.status !== 'expired' : sale.status === status)) && (!category || sale.categories.includes(category)) && (featured === null || sale.featured === (featured === 'true')) && (!q || `${sale.title} ${sale.description} ${sale.products.map((item) => item.title).join(' ')}`.toLowerCase().includes(q)))
+      let rows = (await flashSaleRows()).filter((sale) => !['draft', 'cancelled'].includes(sale.status) && (status === 'all' || (status === 'current' ? sale.status !== 'expired' : sale.status === status)) && (!category || sale.categories.includes(category)) && (featured === null || sale.featured === (featured === 'true')) && (!q || `${sale.title} ${sale.description} ${sale.products.map((item) => item.title).join(' ')}`.toLowerCase().includes(q)))
       const maxDiscount = (sale) => Math.max(0, ...sale.products.map((item) => item.discountPercent)); const sorters = { 'ending-soon': (a, b) => (a.status === 'active' ? 0 : 1) - (b.status === 'active' ? 0 : 1) || new Date(a.endTime) - new Date(b.endTime), 'starting-soon': (a, b) => new Date(a.startTime) - new Date(b.startTime), newest: newestFirst, 'discount-high': (a, b) => maxDiscount(b) - maxDiscount(a), title: (a, b) => a.title.localeCompare(b.title) }
       rows.sort(sorters[sort]); return paginate(rows, query)
     },
-    async get(id) { const sale = (await flashSaleRows()).find((item) => item.id === id); if (!sale) throw new ApiError(404, 'FLASH_SALE_NOT_FOUND', 'Flash sale not found'); return sale },
-    async categories() { const [categories, sales] = await Promise.all([store.read('categories'), flashSaleRows()]); const ids = new Set(sales.filter((sale) => sale.status !== 'expired').flatMap((sale) => sale.categories)); return categories.filter((item) => item.active && ids.has(item.id)).map(({ id, name, slug }) => ({ id, name, slug })) },
+    async get(id) { const sale = (await flashSaleRows()).find((item) => item.id === id && !['draft', 'cancelled'].includes(item.status)); if (!sale) throw new ApiError(404, 'FLASH_SALE_NOT_FOUND', 'Flash sale not found'); return sale },
+    async categories() { const [categories, sales] = await Promise.all([store.read('categories'), flashSaleRows()]); const ids = new Set(sales.filter((sale) => !['expired', 'draft', 'cancelled'].includes(sale.status)).flatMap((sale) => sale.categories)); return categories.filter((item) => item.active && ids.has(item.id)).map(({ id, name, slug }) => ({ id, name, slug })) },
+    async mine(user) {
+      const { profile, brand } = await flashSaleSupplier(user)
+      const sales = (await flashSaleRows()).filter((item) => item.supplierId === profile.id).sort(newestFirst)
+      const products = (await store.read('products')).filter((item) => brand.productIds.includes(item.id) && item.active).map(({ id, title, price, currency, image, stock, categoryId }) => ({ id, title, price, currency, image, stock, categoryId }))
+      return { sales, products, supplier: { id: profile.id, name: profile.displayName } }
+    },
+    async create(body, user) {
+      if (body.status !== undefined && !['draft', 'published'].includes(body.status)) throw new ApiError(400, 'INVALID_FLASH_SALE_STATUS', 'status must be draft or published')
+      if (body.publish !== undefined && typeof body.publish !== 'boolean') throw new ApiError(400, 'VALIDATION_ERROR', 'publish must be a boolean')
+      const values = await flashSaleValues(body, user)
+      const publicationStatus = body.publish === true || body.status === 'published' ? 'published' : 'draft'
+      return store.mutate((db) => { const timestamp = new Date().toISOString(); const sale = { id: store.id('flash-sale'), supplierId: values.profile.id, userId: user.id, title: values.title, description: values.description, featured: false, publicationStatus, startTime: values.startTime, endTime: values.endTime, products: values.products, createdAt: timestamp, updatedAt: timestamp, publishedAt: publicationStatus === 'published' ? timestamp : null }; db.flashSales.push(sale); return sale })
+    },
+    async update(id, body, user) {
+      const { profile } = await flashSaleSupplier(user); const current = (await store.read('flashSales')).find((item) => item.id === id && item.supplierId === profile.id)
+      if (!current) throw new ApiError(404, 'FLASH_SALE_NOT_FOUND', 'Supplier flash sale not found')
+      if (current.publicationStatus === 'cancelled' || flashSaleStatus(current) === 'expired') throw new ApiError(409, 'FLASH_SALE_NOT_EDITABLE', 'Cancelled or ended flash sales cannot be edited')
+      const values = await flashSaleValues(body, user, current)
+      return store.mutate((db) => { const sale = db.flashSales.find((item) => item.id === id); Object.assign(sale, { title: values.title, description: values.description, startTime: values.startTime, endTime: values.endTime, products: values.products, updatedAt: new Date().toISOString() }); return sale })
+    },
+    async publish(id, user) {
+      const { profile } = await flashSaleSupplier(user)
+      return store.mutate((db) => { const sale = db.flashSales.find((item) => item.id === id && item.supplierId === profile.id); if (!sale) throw new ApiError(404, 'FLASH_SALE_NOT_FOUND', 'Supplier flash sale not found'); if (sale.publicationStatus !== 'draft') throw new ApiError(409, 'FLASH_SALE_NOT_DRAFT', 'Only draft flash sales can be published'); if (new Date(sale.endTime) <= new Date()) throw new ApiError(409, 'FLASH_SALE_ENDED', 'An ended flash sale cannot be published'); sale.publicationStatus = 'published'; sale.publishedAt = new Date().toISOString(); sale.updatedAt = sale.publishedAt; return sale })
+    },
+    async cancel(id, user) {
+      const { profile } = await flashSaleSupplier(user)
+      return store.mutate((db) => { const sale = db.flashSales.find((item) => item.id === id && item.supplierId === profile.id); if (!sale) throw new ApiError(404, 'FLASH_SALE_NOT_FOUND', 'Supplier flash sale not found'); if (['cancelled', 'expired'].includes(flashSaleStatus(sale))) throw new ApiError(409, 'FLASH_SALE_NOT_CANCELLABLE', 'This flash sale can no longer be cancelled'); sale.publicationStatus = 'cancelled'; sale.updatedAt = new Date().toISOString(); return sale })
+    },
   }
 
   async function fastSellingRows() {
@@ -908,5 +1086,20 @@ export function createServices(store, environment = process.env) {
     },
   }
 
-  return { about, categories, marketplace, flashSales, fastSelling, sellerPromotions, brands, source, search, community, chat, account, affiliate, support, cart, checkout, seller, auctions, auctionListings, concierge }
+  const promoFeedback = {
+    async submit(body, user) {
+      const email = text(body.email, 'email', { min: 5, max: 254 }).toLowerCase()
+      const feedback = text(body.feedback, 'feedback', { min: 10, max: 2000 })
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiError(400, 'INVALID_EMAIL', 'Enter a valid email address')
+      const fingerprint = createHash('sha256').update(`${email}\n${feedback.toLowerCase()}`).digest('hex')
+      return store.mutate((db) => {
+        if (db.feedbackSubmissions.some((item) => item.fingerprint === fingerprint)) throw new ApiError(409, 'FEEDBACK_ALREADY_SUBMITTED', 'This feedback has already been submitted')
+        const submission = { id: store.id('feedback'), email, feedback, userId: user?.authenticated ? user.id : null, source: 'promo-popup', status: 'received', fingerprint, createdAt: new Date().toISOString() }
+        db.feedbackSubmissions.push(submission)
+        return { id: submission.id, status: submission.status, reward: { type: 'percentage', value: 10, appliesTo: 'next-purchase' } }
+      })
+    },
+  }
+
+  return { about, categories, products, marketplace, buyingPools, flashSales, fastSelling, sellerPromotions, brands, source, search, community, chat, account, affiliate, support, cart, checkout, seller, auctions, auctionListings, concierge, promoFeedback }
 }

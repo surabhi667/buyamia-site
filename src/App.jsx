@@ -24,6 +24,10 @@ import MarketplacesPage from './components/MarketplacesPage'
 import FlashSalesPage from './components/FlashSalesPage'
 import FastSellingPage from './components/FastSellingPage'
 import SellerPromotionsPage from './components/SellerPromotionsPage'
+import BuyingPoolsPage from './components/BuyingPoolsPage'
+import PromoFeedbackPopup from './components/PromoFeedbackPopup'
+import ProductPage from './components/ProductPage'
+import CreateCategoryPage from './components/CreateCategoryPage'
 import './App.css'
 
 const categories = [
@@ -148,6 +152,7 @@ export default function App() {
   const isWishlistPage = window.location.pathname === '/account/wishlist'
   const isAffiliatePage = window.location.pathname === '/account/affiliate'
   const isCategoriesPage = window.location.pathname === '/categories'
+  const isCreateCategoryPage = window.location.pathname === '/categories/create'
   const isBrandsPage = window.location.pathname === '/brands'
   const isSourcePage = window.location.pathname === '/source'
   const isCartPage = window.location.pathname === '/cart' || window.location.pathname.startsWith('/checkout/')
@@ -160,6 +165,8 @@ export default function App() {
   const isFlashSalesPage = window.location.pathname === '/flash-sales' || window.location.pathname.startsWith('/flash-sales/')
   const isFastSellingPage = window.location.pathname === '/fast-selling' || window.location.pathname.startsWith('/fast-selling/')
   const isSellerPromotionsPage = window.location.pathname === '/seller-promotions' || window.location.pathname.startsWith('/seller-promotions/')
+  const isBuyingPoolsPage = window.location.pathname === '/buying-pools' || window.location.pathname.startsWith('/buying-pools/')
+  const productMatch = window.location.pathname.match(/^\/products\/([^/]+)$/)
 
   return (
     <div className={`site${leftOpen ? ' site--left-open' : ''}${rightOpen ? ' site--right-open' : ''}`}>
@@ -171,6 +178,7 @@ export default function App() {
       <LeftSidebar open={leftOpen} onToggle={() => setLeftOpen((value) => !value)} />
       <RightSidebar open={rightOpen} onToggle={() => setRightOpen((value) => !value)} />
       <ChatWindow />
+      <PromoFeedbackPopup />
 
       <div className="site-content">
 
@@ -186,7 +194,7 @@ export default function App() {
             <a href="/brands">
               Brands <span className="chevron">▾</span>
             </a>
-            <a href="/marketplaces/vehicles">
+            <a href="/marketplaces">
               Marketplaces <span className="chevron">▾</span>
             </a>
             <a href="/source">Source</a>
@@ -205,7 +213,9 @@ export default function App() {
         </div>
       </header>
 
-      {isSellerPromotionsPage ? <SellerPromotionsPage /> : isFastSellingPage ? <FastSellingPage /> : isFlashSalesPage ? <FlashSalesPage /> : isMarketplacesPage ? <MarketplacesPage /> : isAuctionsPage ? <AuctionsPage /> : isAboutPage ? <AboutPage /> : isSellerPage ? <SellerExperiencePage /> : isSavedPage ? <SavedPage /> : isAskAmiaPage ? <AskAmiaPage /> : isCartPage ? <CartPage /> : isAccountPage ? <AccountPage /> : isShippingAddressesPage ? <ShippingAddressesPage /> : isSecurityPage ? <SecurityPage /> : isBankAccountsPage ? <BankAccountsPage /> : isOrdersPage ? <OrdersPage /> : isBrowsingHistoryPage ? <BrowsingHistoryPage /> : isWishlistPage ? <WishlistPage /> : isAffiliatePage ? <AffiliatePage /> : isCategoriesPage ? <CategoriesPage /> : isBrandsPage ? <BrandsPage /> : isSourcePage ? <SourcePage /> : isSupportPage ? <SupportPage /> : <>
+      {isCategoriesPage && <div className="category-create-entry shell"><a className="btn btn-charcoal" href="/categories/create">Create Category</a></div>}
+
+      {isCreateCategoryPage ? <CreateCategoryPage /> : productMatch ? <ProductPage id={decodeURIComponent(productMatch[1])} /> : isBuyingPoolsPage ? <BuyingPoolsPage /> : isSellerPromotionsPage ? <SellerPromotionsPage /> : isFastSellingPage ? <FastSellingPage /> : isFlashSalesPage ? <FlashSalesPage /> : isMarketplacesPage ? <MarketplacesPage /> : isAuctionsPage ? <AuctionsPage /> : isAboutPage ? <AboutPage /> : isSellerPage ? <SellerExperiencePage /> : isSavedPage ? <SavedPage /> : isAskAmiaPage ? <AskAmiaPage /> : isCartPage ? <CartPage /> : isAccountPage ? <AccountPage /> : isShippingAddressesPage ? <ShippingAddressesPage /> : isSecurityPage ? <SecurityPage /> : isBankAccountsPage ? <BankAccountsPage /> : isOrdersPage ? <OrdersPage /> : isBrowsingHistoryPage ? <BrowsingHistoryPage /> : isWishlistPage ? <WishlistPage /> : isAffiliatePage ? <AffiliatePage /> : isCategoriesPage ? <CategoriesPage /> : isBrandsPage ? <BrandsPage /> : isSourcePage ? <SourcePage /> : isSupportPage ? <SupportPage /> : <>
       <main>
         <section className="shell hero">
           <div className="hero-top">
@@ -221,9 +231,9 @@ export default function App() {
                     from single orders to full container sourcing.
                   </p>
                 </div>
-                <button className="btn btn-charcoal" type="button">
+                <a className="btn btn-charcoal" href="/marketplaces">
                   Browse Marketplace
-                </button>
+                </a>
               </div>
             </div>
 
@@ -544,10 +554,10 @@ export default function App() {
           <div>
             <h4>Products</h4>
             <ul>
-              <li>Marketplace</li>
-              <li>Auctions</li>
+              <li><a href="/marketplaces">Marketplace</a></li>
+              <li><a href="/auctions">Auctions</a></li>
               <li>Collections</li>
-              <li>Buying Pools</li>
+              <li><a href="/buying-pools">Buying Pools</a></li>
             </ul>
           </div>
           <div>

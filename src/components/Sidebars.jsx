@@ -5,6 +5,7 @@ const icons = {
   ask: '✦',
   cart: '▢',
   saved: '♡',
+  pool: '⊕',
   credit: '◉',
   location: '⌖',
   currency: '¤',
@@ -43,6 +44,7 @@ export function LeftSidebar({ open, onToggle }) {
         <RailButton icon="ask" label="Ask Amia" onClick={() => { window.location.href = '/ask-amia' }} />
         <RailButton icon="cart" label="Cart" onClick={() => { window.location.href = '/cart' }} />
         <RailButton icon="saved" label="Saved items" onClick={() => { window.location.href = '/saved' }} />
+        <RailButton icon="pool" label="Buying Pools" onClick={() => { window.location.href = '/buying-pools' }} />
         <div className="rail-rule" />
         <RailButton icon="credit" label="Credit usage" />
         <RailButton icon="location" label="Location and currency" />
@@ -61,6 +63,7 @@ export function LeftSidebar({ open, onToggle }) {
           <a href="/ask-amia"><Icon name="ask" /><span>Ask Amia</span></a>
           <a href="/cart"><Icon name="cart" /><span>Cart</span></a>
           <a href="/saved"><Icon name="saved" /><span>Saved</span></a>
+          <a href="/buying-pools"><Icon name="pool" /><span>Buying Pools</span></a>
         </nav>
 
         <section className="sidebar-card credit-card">
@@ -92,10 +95,10 @@ export function LeftSidebar({ open, onToggle }) {
 
         <section className="sidebar-section category-links">
           <h3>Shop by Category</h3>
-          <a href="#featured">Furniture</a>
-          <a href="#categories">Clothing &amp; Shoes</a>
-          <a href="#categories">Accessories</a>
-          <a href="#categories">View all categories <span>→</span></a>
+          <a href="/categories?category=furniture">Furniture</a>
+              <a href="/categories?category=clothing-shoes">Clothing &amp; Shoes</a>
+          <a href="/categories?category=jewelry-accessories">Accessories</a>
+          <a href="/categories">View all categories <span>→</span></a>
         </section>
 
         <nav className="sidebar-links sidebar-links--bottom" aria-label="Account links">
