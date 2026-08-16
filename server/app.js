@@ -1,6 +1,7 @@
 import { createServices, ApiError } from './services.js'
 
 const bodyLimit = 512 * 1024
+const sessionCookieName = 'buyamia_session'
 
 function json(response, status, payload, extraHeaders = {}) {
   response.writeHead(status, {
@@ -29,6 +30,60 @@ async function readJson(request) {
   }
 }
 
+function cookieValue(request, name) {
+  const cookies = String(request.headers.cookie || '').split(';')
+  for (const cookie of cookies) {
+    const separator = cookie.indexOf('=')
+    if (separator < 0) continue
+    const key = cookie.slice(0, separator).trim()
+    if (key === name) return cookie.slice(separator + 1).trim()
+  }
+  return ''
+}
+
+function isSecureRequest(request) {
+  return Boolean(request.socket.encrypted || request.headers['x-forwarded-proto'] === 'https' || process.env.NODE_ENV === 'production')
+}
+
+function sessionCookie(request, token, expiresAt) {
+  const maxAge = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000))
+  return [`${sessionCookieName}=${encodeURIComponent(token)}`, 'HttpOnly', 'SameSite=Lax', 'Path=/', `Max-Age=${maxAge}`, `Expires=${new Date(expiresAt).toUTCString()}`, ...(isSecureRequest(request) ? ['Secure'] : [])].join('; ')
+}
+
+function clearSessionCookie(request) {
+  return [`${sessionCookieName}=`, 'HttpOnly', 'SameSite=Lax', 'Path=/', 'Max-Age=0', 'Expires=Thu, 01 Jan 1970 00:00:00 GMT', ...(isSecureRequest(request) ? ['Secure'] : [])].join('; ')
+}
+
+function authRequestMeta(request) {
+  return { userAgent: request.headers['user-agent'] || '' }
+}
+
+function authResponse(result) {
+  const { sessionToken: _sessionToken, sessionExpiresAt: _sessionExpiresAt, ...safe } = result
+  return safe
+}
+
+async function logoutResponse(request, response, services, corsHeaders) {
+  await services.auth.logout(cookieValue(request, sessionCookieName))
+  return json(response, 200, { data: { authenticated: false } }, { ...corsHeaders, 'Set-Cookie': clearSessionCookie(request) })
+}
+
+async function userForRequest(request, services) {
+  const token = cookieValue(request, sessionCookieName)
+  if (token) {
+    try {
+      return (await services.auth.session(token)).user
+    } catch {
+      // Public endpoints keep the demo-user fallback until the private routes are migrated.
+    }
+  }
+  return userFrom(request)
+}
+
+async function requireSessionUser(request, services) {
+  return (await services.auth.session(cookieValue(request, sessionCookieName))).user
+}
+
 function userFrom(request) {
   const authenticated = Boolean(request.headers['x-user-id'] || request.headers['x-session-id'])
   const id = String(request.headers['x-user-id'] || request.headers['x-session-id'] || 'demo-user').slice(0, 120)
@@ -41,14 +96,18 @@ function match(pathname, pattern) {
   return result ? result.slice(1).map(decodeURIComponent) : null
 }
 
+function isAllowedOrigin(origin, allowedOrigin) {
+  return origin === allowedOrigin || origin === 'http://localhost:5173'
+}
+
 export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {}) {
   const services = createServices(store)
 
   return async function app(request, response) {
     const requestId = store.id('request')
     const origin = request.headers.origin
-    const corsHeaders = origin && (origin === allowedOrigin || origin === 'http://localhost:5173')
-      ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' }
+    const corsHeaders = origin && isAllowedOrigin(origin, allowedOrigin)
+      ? { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Credentials': 'true', Vary: 'Origin' }
       : {}
 
     try {
@@ -59,10 +118,23 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
 
       const url = new URL(request.url, 'http://localhost')
       const { pathname, searchParams } = url
-      const user = userFrom(request)
+      const user = await userForRequest(request, services)
       let params
 
       if (request.method === 'GET' && pathname === '/api/health') return json(response, 200, { status: 'ok', service: 'buyamia-api', timestamp: new Date().toISOString() }, corsHeaders)
+      if (request.method === 'POST' && pathname === '/api/auth/signup') {
+        const result = await services.auth.signup(await readJson(request), authRequestMeta(request))
+        return json(response, 201, { data: authResponse(result) }, { ...corsHeaders, 'Set-Cookie': sessionCookie(request, result.sessionToken, result.sessionExpiresAt) })
+      }
+      if (request.method === 'POST' && pathname === '/api/auth/login') {
+        const result = await services.auth.login(await readJson(request), authRequestMeta(request))
+        return json(response, 200, { data: authResponse(result) }, { ...corsHeaders, 'Set-Cookie': sessionCookie(request, result.sessionToken, result.sessionExpiresAt) })
+      }
+      if (request.method === 'POST' && pathname === '/api/auth/logout') {
+        if (origin && !isAllowedOrigin(origin, allowedOrigin)) throw new ApiError(403, 'ORIGIN_NOT_ALLOWED', 'Origin is not allowed')
+        return logoutResponse(request, response, services, corsHeaders)
+      }
+      if (request.method === 'GET' && pathname === '/api/auth/session') return json(response, 200, { data: await services.auth.session(cookieValue(request, sessionCookieName)) }, corsHeaders)
       if (request.method === 'POST' && pathname === '/api/feedback') return json(response, 201, { data: await services.promoFeedback.submit(await readJson(request), user) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/concierge/whatsapp') return json(response, 200, { data: services.concierge.whatsapp(searchParams.get('message')) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/concierge/telegram/status') return json(response, 200, { data: await services.concierge.telegramStatus(user) }, corsHeaders)
@@ -155,7 +227,7 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
       }
 
       if (request.method === 'GET' && (pathname === '/api/cart' || pathname === '/api/cart/summary')) return json(response, 200, { data: await services.cart.get(user) }, corsHeaders)
-      if (request.method === 'POST' && pathname === '/api/cart/items') return json(response, 201, { data: await services.cart.add(await readJson(request), user) }, corsHeaders)
+      if (request.method === 'POST' && pathname === '/api/cart/items') return json(response, 201, { data: await services.cart.add(await readJson(request), await requireSessionUser(request, services)) }, corsHeaders)
       if (request.method === 'DELETE' && pathname === '/api/cart') return json(response, 200, { data: await services.cart.clear(user) }, corsHeaders)
       if (request.method === 'POST' && pathname === '/api/cart/coupon') return json(response, 200, { data: await services.cart.coupon(await readJson(request), user) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/cart/recommendations') return json(response, 200, { data: await services.cart.recommendations() }, corsHeaders)
@@ -165,6 +237,12 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
         if (request.method === 'DELETE') return json(response, 200, { data: await services.cart.remove(params[0], user) }, corsHeaders)
       }
       if (request.method === 'POST' && pathname === '/api/checkout') return json(response, 200, { data: await services.checkout.prepare(await readJson(request), user) }, corsHeaders)
+      if (request.method === 'POST' && pathname === '/api/orders') {
+        if (origin && !isAllowedOrigin(origin, allowedOrigin)) throw new ApiError(403, 'ORIGIN_NOT_ALLOWED', 'Origin is not allowed')
+        const sessionUser = await requireSessionUser(request, services)
+        const result = await services.orders.create(await readJson(request), sessionUser, request.headers['idempotency-key'])
+        return json(response, result.created ? 201 : 200, { data: result.order }, corsHeaders)
+      }
 
       if (request.method === 'GET' && pathname === '/api/affiliate-program') return json(response, 200, { data: await services.affiliate.get() }, corsHeaders)
       if (request.method === 'POST' && pathname === '/api/affiliate-program/applications') return json(response, 201, { data: await services.affiliate.apply(await readJson(request), user) }, corsHeaders)
@@ -243,10 +321,10 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
 
       if (request.method === 'GET' && pathname === '/api/account/orders') return json(response, 200, await services.account.orders(searchParams, user), corsHeaders)
       if ((params = match(pathname, /^\/api\/account\/orders\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.account.order(params[0], user) }, corsHeaders)
-      if (request.method === 'GET' && pathname === '/api/orders') return json(response, 200, await services.account.orders(searchParams, user), corsHeaders)
+      if (request.method === 'GET' && pathname === '/api/orders') return json(response, 200, await services.orders.list(searchParams, await requireSessionUser(request, services)), corsHeaders)
       if ((params = match(pathname, /^\/api\/orders\/([^/]+)\/tracking$/)) && request.method === 'GET') return json(response, 200, { data: await services.account.tracking(params[0], user) }, corsHeaders)
       if ((params = match(pathname, /^\/api\/orders\/([^/]+)\/invoice$/)) && request.method === 'GET') return json(response, 200, { data: await services.account.invoice(params[0], user) }, corsHeaders)
-      if ((params = match(pathname, /^\/api\/orders\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.account.order(params[0], user) }, corsHeaders)
+      if ((params = match(pathname, /^\/api\/orders\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.orders.get(params[0], await requireSessionUser(request, services)) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/account/wishlist') return json(response, 200, await services.account.wishlist(searchParams, user), corsHeaders)
       if (request.method === 'POST' && pathname === '/api/account/wishlist') return json(response, 201, { data: await services.account.addWishlist(await readJson(request), user) }, corsHeaders)
       if (request.method === 'DELETE' && pathname === '/api/account/wishlist') return json(response, 200, { data: await services.account.clearWishlist(user) }, corsHeaders)

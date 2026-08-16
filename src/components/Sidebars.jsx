@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const icons = {
   panel: '◧',
@@ -196,7 +196,114 @@ function SidebarSection({ id, label, color, open, onToggle, children, className 
   )
 }
 
-function CommunityChat({ loggedIn, onLogin }) {
+function AuthModal({ mode, open, onAuthenticated, onClose, onModeChange }) {
+  const dialogRef = useRef(null)
+  const emailRef = useRef(null)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [status, setStatus] = useState('idle')
+  const [error, setError] = useState('')
+  const isSignup = mode === 'signup'
+  const titleId = 'auth-modal-title'
+
+  useEffect(() => {
+    if (!open) return undefined
+    setEmail('')
+    setPassword('')
+    setConfirmPassword('')
+    setStatus('idle')
+    setError('')
+    const frame = window.requestAnimationFrame(() => emailRef.current?.focus())
+    return () => window.cancelAnimationFrame(frame)
+  }, [open, mode])
+
+  useEffect(() => {
+    if (!open) return undefined
+
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const focusable = Array.from(dialogRef.current?.querySelectorAll('button:not([disabled]), input:not([disabled])') || [])
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [open, onClose])
+
+  if (!open) return null
+
+  async function submit(event) {
+    event.preventDefault()
+    if (status === 'submitting') return
+    if (isSignup && password !== confirmPassword) {
+      setError('Passwords do not match.')
+      return
+    }
+    setStatus('submitting')
+    setError('')
+    try {
+      const response = await fetch(isSignup ? '/api/auth/signup' : '/api/auth/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error?.message || 'Authentication failed.')
+      onAuthenticated(payload.data.user)
+    } catch (caught) {
+      setError(caught.message || 'Authentication failed.')
+      setStatus('error')
+    }
+  }
+
+  function switchMode(nextMode) {
+    if (status === 'submitting') return
+    onModeChange(nextMode)
+  }
+
+  return (
+    <div className="auth-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <section className="auth-modal-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={dialogRef}>
+        <button className="auth-modal-close" type="button" onClick={onClose} aria-label="Close authentication dialog">×</button>
+        <h2 id={titleId}>{isSignup ? 'Create your account' : 'Log In'}</h2>
+        <form className="auth-modal-form" onSubmit={submit}>
+          <label htmlFor="auth-email">Email</label>
+          <input id="auth-email" ref={emailRef} type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required maxLength="254" disabled={status === 'submitting'} />
+          <label htmlFor="auth-password">Password</label>
+          <input id="auth-password" type="password" autoComplete={isSignup ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} required minLength={isSignup ? 12 : 1} maxLength="200" disabled={status === 'submitting'} />
+          {isSignup && (
+            <>
+              <label htmlFor="auth-confirm-password">Confirm password</label>
+              <input id="auth-confirm-password" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required minLength="12" maxLength="200" disabled={status === 'submitting'} />
+              <small>Password must contain at least 12 characters.</small>
+            </>
+          )}
+          {error && <p className="auth-modal-error" role="alert">{error}</p>}
+          <button className="auth-modal-submit" type="submit" disabled={status === 'submitting'}>{status === 'submitting' ? 'Loading…' : isSignup ? 'Sign Up' : 'Log In'}</button>
+        </form>
+        <button className="auth-modal-switch" type="button" onClick={() => switchMode(isSignup ? 'login' : 'signup')} disabled={status === 'submitting'}>{isSignup ? 'Log In' : 'Create an account'}</button>
+      </section>
+    </div>
+  )
+}
+
+function CommunityChat({ loggedIn, loggingOut, onLogin, onLogout, onSignup }) {
   const [messages, setMessages] = useState([...discussionMessages, { avatar: '/assets/avatar-3.png', name: 'Ayu', text: 'I found a great lighting maker near Ubud — happy to share details.' }])
   const [draft, setDraft] = useState('')
 
@@ -219,12 +326,15 @@ function CommunityChat({ loggedIn, onLogin }) {
         ))}
       </div>
       {loggedIn ? (
-        <form className="chat-composer" onSubmit={sendMessage}>
-          <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Write your message..." aria-label="Community chat message" />
-          <button type="submit" aria-label="Send message">↑</button>
-        </form>
+        <>
+          <div className="chat-login"><small>Signed in</small><div><button type="button" disabled={loggingOut} onClick={onLogout}>{loggingOut ? 'Logging out...' : 'Logout'}</button></div></div>
+          <form className="chat-composer" onSubmit={sendMessage}>
+            <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Write your message..." aria-label="Community chat message" />
+            <button type="submit" aria-label="Send message">↑</button>
+          </form>
+        </>
       ) : (
-        <div className="chat-login"><small>To chat, please</small><div><button type="button" onClick={onLogin}>Log In</button><button type="button" onClick={onLogin}>Sign Up</button></div></div>
+        <div className="chat-login"><small>To chat, please</small><div><button type="button" onClick={onLogin}>Log In</button><button type="button" onClick={onSignup}>Sign Up</button></div></div>
       )}
       <p className="chat-privacy">By chatting on Buyamia, you agree to our Privacy Policy.</p>
     </div>
@@ -233,9 +343,42 @@ function CommunityChat({ loggedIn, onLogin }) {
 
 export function RightSidebar({ open, onToggle }) {
   const [expanded, setExpanded] = useState(() => new Set(['flash', 'fast', 'promo']))
-  const [loggedIn, setLoggedIn] = useState(false)
+  const [authUser, setAuthUser] = useState(null)
+  const [authModal, setAuthModal] = useState({ open: false, mode: 'login' })
+  const [loggingOut, setLoggingOut] = useState(false)
+  const authReturnFocus = useRef(null)
   const [whatsapp, setWhatsapp] = useState({ url: '', error: '' })
   const [telegram, setTelegram] = useState({ status: 'loading', error: '' })
+  const loggedIn = Boolean(authUser)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch('/api/auth/session', { credentials: 'include', signal: controller.signal })
+      .then(async (response) => {
+        if (response.status === 401) return null
+        const payload = await response.json()
+        if (!response.ok) throw new Error(payload.error?.message || 'Unable to restore session')
+        return payload.data.user
+      })
+      .then((user) => {
+        if (user) setAuthUser(user)
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') setAuthUser(null)
+      })
+    return () => controller.abort()
+  }, [])
+
+  useEffect(() => {
+    function handleAuthRequired(event) {
+      authReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      setAuthModal({ open: true, mode: event.detail?.mode === 'signup' ? 'signup' : 'login' })
+      if (!open) onToggle()
+    }
+
+    window.addEventListener('buyamia:auth-required', handleAuthRequired)
+    return () => window.removeEventListener('buyamia:auth-required', handleAuthRequired)
+  }, [open, onToggle])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -291,6 +434,32 @@ export function RightSidebar({ open, onToggle }) {
     })
   }
 
+  function openAuthModal(mode, event) {
+    authReturnFocus.current = event.currentTarget
+    setAuthModal({ open: true, mode })
+  }
+
+  function closeAuthModal() {
+    setAuthModal((current) => ({ ...current, open: false }))
+    window.requestAnimationFrame(() => authReturnFocus.current?.focus())
+  }
+
+  function authenticated(user) {
+    setAuthUser(user)
+    closeAuthModal()
+  }
+
+  async function logout() {
+    if (loggingOut) return
+    setLoggingOut(true)
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+    } finally {
+      setAuthUser(null)
+      setLoggingOut(false)
+    }
+  }
+
   return (
     <aside className={`app-sidebar app-sidebar--right${open ? ' is-open' : ''}`} aria-label="We-Commerce sidebar">
       <div className="sidebar-rail">
@@ -336,9 +505,10 @@ export function RightSidebar({ open, onToggle }) {
         </section>
 
         <SidebarSection id="community" label="Community Chat" open={expanded.has('community')} onToggle={toggleSection} className="community-section">
-          <CommunityChat loggedIn={loggedIn} onLogin={() => setLoggedIn(true)} />
+          <CommunityChat loggedIn={loggedIn} loggingOut={loggingOut} onLogin={(event) => openAuthModal('login', event)} onLogout={logout} onSignup={(event) => openAuthModal('signup', event)} />
         </SidebarSection>
       </div>
+      <AuthModal mode={authModal.mode} open={authModal.open} onAuthenticated={authenticated} onClose={closeAuthModal} onModeChange={(mode) => setAuthModal((current) => ({ ...current, mode }))} />
     </aside>
   )
 }

@@ -37,7 +37,11 @@ function newestFirst(a, b) { return new Date(b.createdAt) - new Date(a.createdAt
 
 async function passwordHash(password) { const salt = randomBytes(16).toString('hex'); const hash = await scryptAsync(password, salt, 64); return `${salt}:${Buffer.from(hash).toString('hex')}` }
 async function passwordMatches(password, stored) { const [salt, expected] = String(stored || '').split(':'); if (!salt || !expected) return false; const actual = Buffer.from(await scryptAsync(password, salt, 64)); const expectedBuffer = Buffer.from(expected, 'hex'); return actual.length === expectedBuffer.length && timingSafeEqual(actual, expectedBuffer) }
-function publicSecurity(security) { const { passwordHash: _passwordHash, ...safe } = security; return { ...safe, passwordConfigured: Boolean(_passwordHash) } }
+const dummyPasswordHash = '00000000000000000000000000000000:37eb93dcf7f1a0155678935554d2c4839ba75886abfe857c0b3dec6abc1b735dfada31bf00797e77db38e2eb7c18aa6faf637216f618d132b3c614f9d9844a3e'
+function tokenHash(token) { return createHash('sha256').update(token).digest('hex') }
+function tokenMatches(token, storedHash) { const actual = Buffer.from(tokenHash(token)); const expected = Buffer.from(String(storedHash || '')); return actual.length === expected.length && timingSafeEqual(actual, expected) }
+function publicSession(session) { const { tokenHash: _tokenHash, ...safe } = session; return safe }
+function publicSecurity(security) { const { passwordHash: _passwordHash, ...safe } = security; return { ...safe, activeSessions: (safe.activeSessions || []).map(publicSession), passwordConfigured: Boolean(_passwordHash) } }
 function newSecurity(user) { const timestamp = new Date().toISOString(); return { userId: user.id, emailVerified: false, phoneVerified: false, twoFactorEnabled: false, activeSessions: [{ id: 'current', current: true, device: 'Current browser', browser: 'Browser', operatingSystem: 'Unknown', location: 'Unknown', createdAt: timestamp }], loginHistory: [{ id: 'current-login', status: 'success', device: 'Current browser', browser: 'Browser', operatingSystem: 'Unknown', location: 'Unknown', createdAt: timestamp }] } }
 const supportedBankCountries = new Set(['ID', 'AU', 'SG', 'US'])
 const supportedBankCurrencies = new Set(['IDR', 'AUD', 'SGD', 'USD'])
@@ -56,6 +60,46 @@ const searchableTypes = new Map([
 
 function normalizeSearch(value) {
   return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function normalizeEmail(value) {
+  const email = text(value, 'email', { max: 160 }).toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiError(400, 'VALIDATION_ERROR', 'email must be a valid email address')
+  return email
+}
+
+function publicUser(account) {
+  const fullName = [account.firstName, account.lastName].filter(Boolean).join(' ').trim()
+  return {
+    id: account.userId,
+    userId: account.userId,
+    email: account.email,
+    firstName: account.firstName,
+    lastName: account.lastName,
+    name: fullName || account.username || account.email,
+    username: account.username,
+    avatar: account.avatar,
+    authenticated: true,
+  }
+}
+
+const authSessionTtlMs = 7 * 24 * 60 * 60 * 1000
+function invalidCredentials() { return new ApiError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect') }
+const orderStatuses = ['pending_payment', 'order_received', 'processing', 'shipped', 'delivered', 'cancelled']
+const timelineSteps = ['order_received', 'processing', 'shipped', 'delivered']
+const sensitiveOrderFields = new Set(['cardNumber', 'securityCode', 'cvc', 'cvv', 'paymentToken'])
+
+function orderStatusLabel(status) {
+  const labels = { pending_payment: 'Payment pending', order_received: 'Order received', processing: 'Processing', shipped: 'Shipped', delivered: 'Delivered', cancelled: 'Cancelled' }
+  return labels[status] || status
+}
+
+function rejectSensitiveOrderData(value) {
+  if (!value || typeof value !== 'object') return
+  for (const [key, entry] of Object.entries(value)) {
+    if (sensitiveOrderFields.has(key)) throw new ApiError(400, 'SENSITIVE_PAYMENT_DATA', `${key} must not be submitted`)
+    if (entry && typeof entry === 'object') rejectSensitiveOrderData(entry)
+  }
 }
 
 function searchOptions(query) {
@@ -90,6 +134,124 @@ function relevance(query, fields) {
 }
 
 export function createServices(store, environment = process.env) {
+  function newAuthSession(timestamp, requestMeta = {}) {
+    const token = randomBytes(32).toString('base64url')
+    const expiresAt = new Date(Date.now() + authSessionTtlMs).toISOString()
+    return {
+      token,
+      session: {
+        id: store.id('session'),
+        tokenHash: tokenHash(token),
+        device: requestMeta.userAgent ? String(requestMeta.userAgent).slice(0, 160) : 'Browser',
+        browser: 'Browser',
+        operatingSystem: 'Unknown',
+        location: 'Unknown',
+        createdAt: timestamp,
+        lastUsedAt: timestamp,
+        expiresAt,
+      },
+    }
+  }
+
+  function accountByEmail(accounts, email) {
+    return accounts.find((item) => item.normalizedEmail === email || item.email?.toLowerCase() === email)
+  }
+
+  function authSecurity(userId, timestamp, passwordHashValue, session, loginStatus = 'success') {
+    return {
+      userId,
+      emailVerified: false,
+      phoneVerified: false,
+      twoFactorEnabled: false,
+      passwordHash: passwordHashValue,
+      passwordUpdatedAt: timestamp,
+      activeSessions: [session],
+      loginHistory: [{ id: store.id('login'), status: loginStatus, createdAt: timestamp }],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }
+  }
+
+  const auth = {
+    async signup(body, requestMeta = {}) {
+      const email = normalizeEmail(body.email)
+      const password = text(body.password, 'password', { min: 12, max: 200 })
+      const rawName = text(body.name, 'name', { max: 160, required: false })
+      const explicitFirstName = text(body.firstName, 'firstName', { max: 80, required: false })
+      const explicitLastName = text(body.lastName, 'lastName', { max: 80, required: false })
+      const passwordHashValue = await passwordHash(password)
+      return store.mutate((db) => {
+        if (accountByEmail(db.accounts, email)) throw new ApiError(409, 'EMAIL_EXISTS', 'That email address is already in use')
+        const timestamp = new Date().toISOString()
+        const userId = store.id('user')
+        const [derivedFirstName = 'Buyamia', ...derivedLastName] = (rawName || email.split('@')[0]).trim().split(/\s+/)
+        const firstName = explicitFirstName || derivedFirstName
+        const lastName = explicitLastName || derivedLastName.join(' ') || 'User'
+        const username = `user-${userId.replace(/^user_/, '').slice(0, 12)}`
+        const account = { userId, firstName, lastName, username, email, normalizedEmail: email, phone: '', company: '', country: 'Indonesia (ID)', language: 'en', currency: 'IDR', avatar: '/assets/avatar-1.png', createdAt: timestamp, updatedAt: timestamp }
+        const { token, session } = newAuthSession(timestamp, requestMeta)
+        db.accounts.push(account)
+        db.accountSecurity.push(authSecurity(userId, timestamp, passwordHashValue, session))
+        return { user: publicUser(account), session: publicSession(session), sessionToken: token, sessionExpiresAt: session.expiresAt }
+      })
+    },
+    async login(body, requestMeta = {}) {
+      const email = normalizeEmail(body.email)
+      const password = text(body.password, 'password', { min: 1, max: 200 })
+      const accounts = await store.read('accounts')
+      const account = accountByEmail(accounts, email)
+      const security = account ? (await store.read('accountSecurity')).find((item) => item.userId === account.userId) : null
+      const matches = await passwordMatches(password, security?.passwordHash || dummyPasswordHash)
+      if (!account || !security?.passwordHash || !matches) throw invalidCredentials()
+      return store.mutate((db) => {
+        const currentAccount = db.accounts.find((item) => item.userId === account.userId)
+        const currentSecurity = db.accountSecurity.find((item) => item.userId === account.userId)
+        if (!currentAccount || !currentSecurity?.passwordHash) throw invalidCredentials()
+        const timestamp = new Date().toISOString()
+        const { token, session } = newAuthSession(timestamp, requestMeta)
+        currentSecurity.activeSessions = [...(currentSecurity.activeSessions || []).filter((item) => !item.expiresAt || new Date(item.expiresAt) > new Date(timestamp)), session]
+        currentSecurity.loginHistory = [...(currentSecurity.loginHistory || []), { id: store.id('login'), status: 'success', createdAt: timestamp }]
+        currentSecurity.updatedAt = timestamp
+        return { user: publicUser(currentAccount), session: publicSession(session), sessionToken: token, sessionExpiresAt: session.expiresAt }
+      })
+    },
+    async session(token) {
+      if (!token) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Authentication required')
+      const state = await store.getState()
+      const security = state.accountSecurity.find((item) => (item.activeSessions || []).some((session) => session.tokenHash && tokenMatches(token, session.tokenHash)))
+      const session = security?.activeSessions?.find((item) => item.tokenHash && tokenMatches(token, item.tokenHash))
+      if (!security || !session) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Authentication required')
+      const timestamp = new Date().toISOString()
+      if (new Date(session.expiresAt) <= new Date(timestamp)) {
+        await store.mutate((db) => {
+          const currentSecurity = db.accountSecurity.find((item) => item.userId === security.userId)
+          if (currentSecurity) currentSecurity.activeSessions = (currentSecurity.activeSessions || []).filter((item) => item.id !== session.id)
+        })
+        throw new ApiError(401, 'SESSION_EXPIRED', 'Session expired')
+      }
+      return store.mutate((db) => {
+        const currentSecurity = db.accountSecurity.find((item) => item.userId === security.userId)
+        const currentSession = currentSecurity?.activeSessions?.find((item) => item.id === session.id)
+        const account = db.accounts.find((item) => item.userId === security.userId)
+        if (!currentSecurity || !currentSession || !account) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Authentication required')
+        currentSession.lastUsedAt = timestamp
+        currentSecurity.updatedAt = timestamp
+        return { user: publicUser(account), session: publicSession(currentSession) }
+      })
+    },
+    async logout(token) {
+      if (!token) return { authenticated: false }
+      return store.mutate((db) => {
+        const security = db.accountSecurity.find((item) => (item.activeSessions || []).some((session) => session.tokenHash && tokenMatches(token, session.tokenHash)))
+        if (!security) return { authenticated: false }
+        const session = security.activeSessions.find((item) => item.tokenHash && tokenMatches(token, item.tokenHash))
+        security.activeSessions = security.activeSessions.filter((item) => item.id !== session.id)
+        security.updatedAt = new Date().toISOString()
+        return { authenticated: false }
+      })
+    },
+  }
+
   const about = {
     async get() { return store.read('aboutPage') },
     async section(id) { const page = await store.read('aboutPage'); const allowed = ['company', 'confidence', 'brands', 'testimonials', 'achievement', 'verification', 'impact', 'faq', 'closing']; if (!allowed.includes(id)) throw new ApiError(404, 'ABOUT_SECTION_NOT_FOUND', 'About section not found'); const value = page[id]; if (!value) throw new ApiError(404, 'ABOUT_SECTION_NOT_FOUND', 'About section not found'); return value },
@@ -639,7 +801,7 @@ export function createServices(store, environment = process.env) {
     async prompt(body, user) {
       const prompt = text(body.prompt || body.text, 'prompt', { max: 4000 })
       let conversationId = body.conversationId
-      if (conversationId !== undefined) conversationId = text(conversationId, 'conversationId', { max: 160 })
+      if (conversationId !== undefined && conversationId !== null) conversationId = text(conversationId, 'conversationId', { max: 160 })
       if (!conversationId) conversationId = (await this.createConversation({ title: prompt.slice(0, 72) }, user)).id
       const messages = await this.send(conversationId, { prompt }, user)
       return { conversationId, ...messages }
@@ -658,20 +820,19 @@ export function createServices(store, environment = process.env) {
       const firstName = text(body.firstName ?? current.firstName, 'firstName', { max: 80 })
       const lastName = text(body.lastName ?? current.lastName, 'lastName', { max: 80 })
       const username = text(body.username ?? current.username, 'username', { min: 3, max: 40 })
-      const email = text(body.email ?? current.email, 'email', { max: 160 })
+      const email = normalizeEmail(body.email ?? current.email)
       const phone = text(body.phone ?? current.phone, 'phone', { max: 40 })
       const company = text(body.company ?? current.company, 'company', { max: 160, required: false }) || ''
       const country = text(body.country ?? current.country, 'country', { max: 100 })
       const language = text(body.language ?? current.language, 'language', { max: 12 })
       const currency = text(body.currency ?? current.currency, 'currency', { min: 3, max: 3 })
       const avatar = text(body.avatar ?? current.avatar ?? user.avatar, 'avatar', { max: 500000 })
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiError(400, 'VALIDATION_ERROR', 'email must be a valid email address')
       if (!/^\+?[0-9][0-9 ()-]{5,38}$/.test(phone)) throw new ApiError(400, 'VALIDATION_ERROR', 'phone must be a valid phone number')
       return store.mutate((db) => {
         const timestamp = new Date().toISOString()
-        const profile = { userId: user.id, firstName, lastName, username, email, phone, company, country, language, currency: currency.toUpperCase(), avatar, updatedAt: timestamp }
+        const profile = { userId: user.id, firstName, lastName, username, email, normalizedEmail: email, phone, company, country, language, currency: currency.toUpperCase(), avatar, updatedAt: timestamp }
         if (db.accounts.some((item) => item.userId !== user.id && item.username?.toLowerCase() === username.toLowerCase())) throw new ApiError(409, 'USERNAME_EXISTS', 'That username is already in use')
-        if (db.accounts.some((item) => item.userId !== user.id && item.email?.toLowerCase() === email.toLowerCase())) throw new ApiError(409, 'EMAIL_EXISTS', 'That email address is already in use')
+        if (db.accounts.some((item) => item.userId !== user.id && (item.normalizedEmail === email || item.email?.toLowerCase() === email))) throw new ApiError(409, 'EMAIL_EXISTS', 'That email address is already in use')
         const index = db.accounts.findIndex((item) => item.userId === user.id)
         if (index < 0) db.accounts.push({ ...profile, createdAt: timestamp })
         else db.accounts[index] = { ...db.accounts[index], ...profile }
@@ -712,7 +873,7 @@ export function createServices(store, environment = process.env) {
       const result = await store.mutate((db) => { let security = db.accountSecurity.find((item) => item.userId === user.id); if (!security) { security = newSecurity(user); db.accountSecurity.push(security) }; security.passwordHash = hash; security.passwordUpdatedAt = new Date().toISOString(); security.activeSessions = security.activeSessions.filter((item) => item.current); security.updatedAt = security.passwordUpdatedAt; return security })
       return publicSecurity(result)
     },
-    async sessions(user) { const security = (await store.read('accountSecurity')).find((item) => item.userId === user.id); return (security || newSecurity(user)).activeSessions },
+    async sessions(user) { const security = (await store.read('accountSecurity')).find((item) => item.userId === user.id); return (security || newSecurity(user)).activeSessions.map(publicSession) },
     async removeSession(id, user) { return store.mutate((db) => { const security = db.accountSecurity.find((item) => item.userId === user.id); if (!security) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Session not found'); const session = security.activeSessions.find((item) => item.id === id); if (!session || session.current) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Session not found'); security.activeSessions = security.activeSessions.filter((item) => item.id !== id); return { id } }) },
     async loginHistory(query, user) { const security = (await store.read('accountSecurity')).find((item) => item.userId === user.id); return paginate([...(security || newSecurity(user)).loginHistory].sort(newestFirst), query) },
     async logoutAll(user) { const result = await store.mutate((db) => { let security = db.accountSecurity.find((item) => item.userId === user.id); if (!security) { security = newSecurity(user); db.accountSecurity.push(security) }; security.activeSessions = security.activeSessions.filter((item) => item.current); security.updatedAt = new Date().toISOString(); return security }); return publicSecurity(result) },
@@ -856,29 +1017,70 @@ export function createServices(store, environment = process.env) {
     },
   }
 
+  function cartFromState(db, user) {
+    const productById = new Map(db.products.map((product) => [product.id, product]))
+    const items = db.cartItems.filter((item) => item.userId === user.id).map((item) => {
+      const product = productById.get(item.productId)
+      if (!product || !product.active) throw new ApiError(409, 'PRODUCT_UNAVAILABLE', 'A cart product is no longer available')
+      if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 999) throw new ApiError(400, 'INVALID_CART_QUANTITY', 'Cart contains an invalid quantity')
+      if (!Number.isInteger(item.packSize) || item.packSize < 1 || item.packSize > 999) throw new ApiError(400, 'INVALID_CART_QUANTITY', 'Cart contains an invalid pack size')
+      if (!['air', 'sea'].includes(item.shippingMethod || 'sea')) throw new ApiError(400, 'INVALID_SHIPPING_METHOD', 'Cart contains an invalid shipping method')
+      const unitPrice = product.price
+      return { ...item, product, unitPrice, shippingMethod: item.shippingMethod || 'sea', lineTotal: unitPrice * item.quantity, availableStock: product.stock ?? 100 }
+    })
+    const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0)
+    const shipping = items.length ? (items.some((item) => item.shippingMethod === 'air') ? 600000 : 350000) : 0
+    const coupon = db.cartCoupons.find((item) => item.userId === user.id) || null
+    if (coupon && coupon.code !== 'BUYAMIA10') throw new ApiError(400, 'INVALID_COUPON', 'This promotional code is invalid or expired')
+    const automaticDiscount = subtotal >= 3000000 ? 350000 : 0
+    const couponDiscount = coupon?.code === 'BUYAMIA10' ? Math.min(Math.round(subtotal * .1), 500000) : 0
+    const discount = Math.max(automaticDiscount, couponDiscount)
+    const taxes = 0
+    return { items, summary: { itemCount: items.reduce((sum, item) => sum + item.quantity, 0), subtotal, shipping, discount, taxes, total: Math.max(0, subtotal + shipping + taxes - discount), currency: 'IDR', coupon: coupon?.code || null, deliveryEstimate: items.length ? '7–14 business days' : null } }
+  }
+
+  function orderShippingAddress(db, user) {
+    const session = db.checkoutSessions.find((item) => item.userId === user.id)
+    const shipping = session?.shipping || {}
+    const profile = db.accounts.find((item) => item.userId === user.id)
+    const defaultAddress = db.shippingAddresses.find((item) => item.userId === user.id && item.isDefault) || db.shippingAddresses.find((item) => item.userId === user.id)
+    return {
+      name: [shipping.firstName, shipping.lastName].filter(Boolean).join(' ').trim() || defaultAddress?.recipientName || profile?.name || profile?.firstName || 'Buyamia Buyer',
+      phone: shipping.phone || defaultAddress?.phone || profile?.phone || '',
+      line1: shipping.addressLine1 || defaultAddress?.line1 || '',
+      line2: shipping.addressLine2 || defaultAddress?.line2 || '',
+      city: shipping.city || defaultAddress?.city || '',
+      region: shipping.region || defaultAddress?.state || '',
+      postalCode: shipping.zipCode || defaultAddress?.postalCode || '',
+      country: shipping.country || defaultAddress?.country || profile?.country || '',
+    }
+  }
+
+  function publicOrder(order) {
+    const { idempotencyKey: _idempotencyKey, userId: _userId, ...safe } = order
+    return safe
+  }
+
+  function enrichOrder(order, products) {
+    const productById = new Map(products.map((item) => [item.id, item]))
+    const items = order.items.map((item) => ({ ...item, product: item.product || productById.get(item.productId) || null }))
+    const reachedStatuses = new Set((order.timeline || []).map((entry) => entry.status))
+    const timeline = timelineSteps.map((status) => {
+      const entry = (order.timeline || []).find((item) => item.status === status)
+      return { status, label: orderStatusLabel(status), at: entry?.at || null, reached: reachedStatuses.has(status) }
+    })
+    if (order.status === 'pending_payment' && !timeline.some((entry) => entry.reached)) timeline[0].reached = true
+    return publicOrder({ ...order, items, timeline, statusLabel: orderStatusLabel(order.status), itemCount: items.reduce((sum, item) => sum + item.quantity, 0) })
+  }
+
   function positiveInteger(value, field, maximum = 999) {
     if (!Number.isInteger(value) || value < 1 || value > maximum) throw new ApiError(400, 'VALIDATION_ERROR', `${field} must be an integer between 1 and ${maximum}`)
     return value
   }
 
   async function cartView(user) {
-    const [products, cartItems, coupons] = await Promise.all([store.read('products'), store.read('cartItems'), store.read('cartCoupons')])
-    const productById = new Map(products.map((product) => [product.id, product]))
-    const unavailableIds = cartItems.filter((item) => item.userId === user.id && !productById.get(item.productId)?.active).map((item) => item.id)
-    if (unavailableIds.length) await store.mutate((db) => { db.cartItems = db.cartItems.filter((item) => !unavailableIds.includes(item.id)) })
-    const items = cartItems.filter((item) => item.userId === user.id && !unavailableIds.includes(item.id)).map((item) => {
-      const product = productById.get(item.productId)
-      const unitPrice = item.unitPrice ?? product.price
-      return { ...item, product, unitPrice, lineTotal: unitPrice * item.quantity, availableStock: product.stock ?? 100 }
-    })
-    const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0)
-    const shipping = items.length ? (items.some((item) => item.shippingMethod === 'air') ? 600000 : 350000) : 0
-    const coupon = coupons.find((item) => item.userId === user.id)
-    const automaticDiscount = subtotal >= 3000000 ? 350000 : 0
-    const couponDiscount = coupon?.code === 'BUYAMIA10' ? Math.min(Math.round(subtotal * .1), 500000) : 0
-    const discount = Math.max(automaticDiscount, couponDiscount)
-    const taxes = 0
-    return { items, summary: { itemCount: items.reduce((sum, item) => sum + item.quantity, 0), subtotal, shipping, discount, taxes, total: Math.max(0, subtotal + shipping + taxes - discount), currency: 'IDR', coupon: coupon?.code || null, deliveryEstimate: items.length ? '7–14 business days' : null } }
+    const db = await store.getState()
+    return cartFromState(db, user)
   }
 
   const cart = {
@@ -887,8 +1089,24 @@ export function createServices(store, environment = process.env) {
       const productId = text(body.productId, 'productId', { max: 120 }); const quantity = positiveInteger(body.quantity ?? 1, 'quantity')
       const product = (await store.read('products')).find((item) => item.id === productId && item.active)
       if (!product) throw new ApiError(404, 'PRODUCT_NOT_FOUND', 'Product not found or unavailable')
+      const packSize = positiveInteger(body.packSize ?? product.minimumOrder ?? 1, 'packSize')
+      const minimumOrder = product.minimumOrder ?? 1
+      if (packSize < minimumOrder) throw new ApiError(400, 'MINIMUM_ORDER_REQUIRED', `Minimum order is ${minimumOrder} pcs`)
       const stock = product.stock ?? 100; if (quantity > stock) throw new ApiError(409, 'INSUFFICIENT_STOCK', `Only ${stock} units are available`)
-      await store.mutate((db) => { const item = { id: store.id('cart'), userId: user.id, productId, quantity, packSize: positiveInteger(body.packSize ?? 1, 'packSize'), unitPrice: product.price, shippingMethod: 'sea', customization: 'No', warranty: 'No', createdAt: new Date().toISOString() }; db.cartItems.push(item) })
+      await store.mutate((db) => {
+        const timestamp = new Date().toISOString()
+        const existing = db.cartItems.find((item) => item.userId === user.id && item.productId === productId && item.packSize === packSize && (item.shippingMethod || 'sea') === 'sea' && (item.customization || 'No') === 'No' && (item.warranty || 'No') === 'No')
+        if (existing) {
+          const nextQuantity = existing.quantity + quantity
+          if (nextQuantity > stock) throw new ApiError(409, 'INSUFFICIENT_STOCK', `Only ${stock} units are available`)
+          existing.quantity = nextQuantity
+          existing.unitPrice = product.price
+          existing.updatedAt = timestamp
+          return
+        }
+        const item = { id: store.id('cart'), userId: user.id, productId, quantity, packSize, unitPrice: product.price, shippingMethod: 'sea', customization: 'No', warranty: 'No', createdAt: timestamp }
+        db.cartItems.push(item)
+      })
       return cartView(user)
     },
     async update(id, body, user) {
@@ -912,9 +1130,84 @@ export function createServices(store, environment = process.env) {
       const allowedPayments = ['paypal', 'card']; if (body.paymentMethod && !allowedPayments.includes(body.paymentMethod)) throw new ApiError(400, 'VALIDATION_ERROR', 'paymentMethod must be paypal or card')
       if (step === 'delivery') { for (const field of ['firstName', 'lastName', 'country', 'addressLine1', 'city', 'region', 'zipCode', 'phone']) text(body.shipping?.[field], `shipping.${field}`, { max: 160 }) }
       if (step === 'card') { const card = body.card || {}; text(card.cardholderName, 'card.cardholderName', { max: 120 }); if (!/^\d{12,19}$/.test(String(card.cardNumber || '').replace(/\s/g, ''))) throw new ApiError(400, 'VALIDATION_ERROR', 'card.cardNumber must contain 12 to 19 digits'); if (!/^\d{2}\/\d{2}$/.test(String(card.expiration || ''))) throw new ApiError(400, 'VALIDATION_ERROR', 'card.expiration must use MM/YY'); if (!/^\d{3,4}$/.test(String(card.securityCode || ''))) throw new ApiError(400, 'VALIDATION_ERROR', 'card.securityCode must contain 3 or 4 digits') }
-      const safeBody = { ...body }; if (safeBody.card) safeBody.card = { cardholderName: safeBody.card.cardholderName, last4: String(safeBody.card.cardNumber).replace(/\s/g, '').slice(-4), expiration: safeBody.card.expiration }
+      const safeBody = { ...body }; if (safeBody.card) delete safeBody.card
       const session = await store.mutate((db) => { let value = db.checkoutSessions.find((item) => item.userId === user.id); if (!value) { value = { id: store.id('checkout'), userId: user.id, createdAt: new Date().toISOString() }; db.checkoutSessions.push(value) } Object.assign(value, safeBody, { step, summary: cartData.summary, updatedAt: new Date().toISOString() }); return value })
       return session
+    },
+  }
+
+  const orders = {
+    async create(body, user, headerIdempotencyKey) {
+      rejectSensitiveOrderData(body)
+      const idempotencyKey = text(headerIdempotencyKey || body.idempotencyKey, 'idempotencyKey', { max: 160 })
+      return store.mutate((db) => {
+        const existing = db.orders.find((item) => item.userId === user.id && item.idempotencyKey === idempotencyKey)
+        if (existing) return { order: enrichOrder(existing, db.products), created: false }
+        const cartData = cartFromState(db, user)
+        if (!cartData.items.length) throw new ApiError(409, 'EMPTY_CART', 'Add an item to your cart before placing an order')
+        const timestamp = new Date().toISOString()
+        const orderId = store.id('order')
+        const shortId = orderId.replace(/^order_/, '').replace(/-/g, '').slice(0, 8).toUpperCase()
+        const orderNumber = `BYA-${new Date(timestamp).toISOString().slice(0, 10).replace(/-/g, '')}-${shortId}`
+        const status = 'pending_payment'
+        const items = cartData.items.map((item) => ({
+          id: store.id('order-item'),
+          productId: item.productId,
+          title: item.product.title,
+          image: item.product.image,
+          quantity: item.quantity,
+          packSize: item.packSize,
+          unitPrice: item.unitPrice,
+          lineTotal: item.lineTotal,
+          currency: item.product.currency || cartData.summary.currency,
+          shippingMethod: item.shippingMethod,
+          customization: item.customization || 'No',
+          warranty: item.warranty || 'No',
+          product: { id: item.product.id, title: item.product.title, image: item.product.image, categoryId: item.product.categoryId },
+        }))
+        const order = {
+          id: orderId,
+          userId: user.id,
+          idempotencyKey,
+          orderNumber,
+          status,
+          statusLabel: orderStatusLabel(status),
+          currency: cartData.summary.currency,
+          subtotal: cartData.summary.subtotal,
+          shippingCost: cartData.summary.shipping,
+          discount: cartData.summary.discount,
+          taxes: cartData.summary.taxes,
+          total: cartData.summary.total,
+          itemCount: cartData.summary.itemCount,
+          coupon: cartData.summary.coupon,
+          shipping: { carrier: 'Buyamia Logistics', service: cartData.items.some((item) => item.shippingMethod === 'air') ? 'Air Freight' : 'Sea Freight', destination: orderShippingAddress(db, user).country || 'To be confirmed' },
+          shippingAddress: orderShippingAddress(db, user),
+          deliveryEstimate: cartData.summary.deliveryEstimate,
+          payment: { method: 'Simulated checkout', status: 'pending', label: 'Payment pending' },
+          timeline: [{ status: 'order_received', label: orderStatusLabel('order_received'), at: timestamp }],
+          items,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }
+        db.orders.push(order)
+        db.cartItems = db.cartItems.filter((item) => item.userId !== user.id)
+        db.cartCoupons = db.cartCoupons.filter((item) => item.userId !== user.id)
+        db.checkoutSessions = db.checkoutSessions.filter((item) => item.userId !== user.id)
+        return { order: enrichOrder(order, db.products), created: true }
+      })
+    },
+    async list(query, user) {
+      const search = normalizeSearch(query.get('q'))
+      const status = query.get('status')
+      if (status && !orderStatuses.includes(status)) throw new ApiError(400, 'VALIDATION_ERROR', 'status is not supported')
+      const rows = (await store.read('orders')).filter((item) => item.userId === user.id && (!status || item.status === status) && (!search || normalizeSearch(item.orderNumber).includes(search))).sort(newestFirst).map((item) => publicOrder({ ...item, statusLabel: orderStatusLabel(item.status), itemCount: item.itemCount ?? item.items?.reduce((sum, entry) => sum + entry.quantity, 0) ?? 0 }))
+      return paginate(rows, query)
+    },
+    async get(id, user) {
+      const [ordersData, products] = await Promise.all([store.read('orders'), store.read('products')])
+      const order = ordersData.find((item) => item.id === id && item.userId === user.id)
+      if (!order) throw new ApiError(404, 'ORDER_NOT_FOUND', 'Order not found')
+      return enrichOrder(order, products)
     },
   }
 
@@ -1101,5 +1394,5 @@ export function createServices(store, environment = process.env) {
     },
   }
 
-  return { about, categories, products, marketplace, buyingPools, flashSales, fastSelling, sellerPromotions, brands, source, search, community, chat, account, affiliate, support, cart, checkout, seller, auctions, auctionListings, concierge, promoFeedback }
+  return { auth, about, categories, products, marketplace, buyingPools, flashSales, fastSelling, sellerPromotions, brands, source, search, community, chat, account, affiliate, support, cart, checkout, orders, seller, auctions, auctionListings, concierge, promoFeedback }
 }

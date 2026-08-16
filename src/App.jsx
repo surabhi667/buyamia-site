@@ -147,7 +147,7 @@ export default function App() {
   const isShippingAddressesPage = window.location.pathname === '/account/shipping-addresses'
   const isSecurityPage = window.location.pathname === '/account/security'
   const isBankAccountsPage = window.location.pathname === '/account/bank-accounts'
-  const isOrdersPage = window.location.pathname === '/account/orders'
+  const isOrdersPage = window.location.pathname === '/account/orders' || window.location.pathname.startsWith('/account/orders/')
   const isBrowsingHistoryPage = window.location.pathname === '/account/history'
   const isWishlistPage = window.location.pathname === '/account/wishlist'
   const isAffiliatePage = window.location.pathname === '/account/affiliate'
