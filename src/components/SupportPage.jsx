@@ -53,7 +53,7 @@ export default function SupportPage() {
   return <main className="support-page shell">
     <section className="support-intro"><p className="eyebrow">Support</p><h1>How can we <em>help?</em></h1><p>Find an answer, review your requests, or send our team a message.</p></section>
     <section className="support-grid">
-      <form className="support-form" onSubmit={submit}>
+      <form className="support-form" id="contact" onSubmit={submit}>
         <h2>Send a request</h2>
         <label>Subject<input value={ticket.title} onChange={(event) => setTicket({ ...ticket, title: event.target.value })} maxLength="160" required /></label>
         <label>Category<select value={ticket.categoryId} onChange={(event) => setTicket({ ...ticket, categoryId: event.target.value })} required><option value="">Select a category</option>{categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select></label>

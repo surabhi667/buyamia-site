@@ -47,10 +47,72 @@ function ChatMessage({ message }) {
 }
 
 function ChatInput({ value, onChange, onSend }) {
+  const recognitionRef = useRef(null)
+  const initialValueRef = useRef('')
+  const stoppingRef = useRef(false)
+  const [listening, setListening] = useState(false)
+  const [voiceMessage, setVoiceMessage] = useState('')
+  const SpeechRecognition = typeof window === 'undefined' ? null : window.SpeechRecognition || window.webkitSpeechRecognition
+
+  useEffect(() => () => {
+    stoppingRef.current = true
+    recognitionRef.current?.abort()
+  }, [])
+
+  function stopListening() {
+    stoppingRef.current = true
+    recognitionRef.current?.stop()
+    setListening(false)
+    setVoiceMessage('Voice input stopped. You can edit your message before sending.')
+  }
+
+  function toggleVoiceInput() {
+    if (listening) return stopListening()
+    if (!SpeechRecognition) {
+      setVoiceMessage('Voice input is not supported by this browser. You can continue typing.')
+      return
+    }
+    const recognition = new SpeechRecognition()
+    recognitionRef.current = recognition
+    stoppingRef.current = false
+    initialValueRef.current = value.trim()
+    recognition.lang = document.documentElement.lang || navigator.language || 'en-US'
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.onstart = () => { setListening(true); setVoiceMessage('Listening… Click the microphone again to stop.') }
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results).map((result) => result[0]?.transcript || '').join(' ').trim()
+      onChange([initialValueRef.current, transcript].filter(Boolean).join(' '))
+    }
+    recognition.onerror = (event) => {
+      setListening(false)
+      if (event.error === 'aborted' && stoppingRef.current) return setVoiceMessage('Voice input stopped.')
+      const errors = {
+        'not-allowed': 'Microphone permission was denied. Check your browser permissions and try again.',
+        'service-not-allowed': 'Voice recognition is not available in this browser.',
+        'audio-capture': 'No microphone is available. Check your audio device and try again.',
+        'no-speech': 'No speech was detected. Try again when you are ready.',
+        network: 'Voice recognition is temporarily unavailable. Please try again.',
+      }
+      setVoiceMessage(errors[event.error] || 'Voice input could not be completed. Please try again.')
+    }
+    recognition.onend = () => {
+      recognitionRef.current = null
+      setListening(false)
+      if (!stoppingRef.current) setVoiceMessage((current) => current.startsWith('Listening') ? 'Voice input finished. You can edit your message before sending.' : current)
+    }
+    try { recognition.start() } catch { setListening(false); setVoiceMessage('Voice input could not start. Please try again.') }
+  }
+
+  function send() {
+    if (listening) stopListening()
+    onSend()
+  }
+
   function handleKeyDown(event) {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      onSend()
+      send()
     }
   }
 
@@ -58,13 +120,15 @@ function ChatInput({ value, onChange, onSend }) {
     <div className="amia-chat__composer">
       <textarea
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => { onChange(event.target.value); setVoiceMessage('') }}
         onKeyDown={handleKeyDown}
         placeholder="Ask a question..."
         aria-label="Message Amia"
       />
       <div className="amia-chat__tools" aria-hidden="true"><span>⌕</span><span>☺</span><span>♩</span></div>
-      <button type="button" onClick={onSend} disabled={!value.trim()} aria-label="Send message">↑</button>
+      {voiceMessage && <p className="amia-chat__voice-status" role="status">{voiceMessage}</p>}
+      <button className={`amia-chat__voice${listening ? ' is-listening' : ''}`} type="button" onClick={toggleVoiceInput} disabled={!SpeechRecognition} aria-label={listening ? 'Stop voice input' : 'Use voice input'} aria-pressed={listening} title={SpeechRecognition ? (listening ? 'Stop voice input' : 'Use voice input') : 'Voice input is not supported by this browser'}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm-6-3a6 6 0 0 0 12 0M12 17v4m-3 0h6" /></svg></button>
+      <button className="amia-chat__send" type="button" onClick={send} disabled={!value.trim()} aria-label="Send message">↑</button>
     </div>
   )
 }

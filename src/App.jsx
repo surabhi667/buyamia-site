@@ -13,12 +13,17 @@ import WishlistPage from './components/WishlistPage'
 import AffiliatePage from './components/AffiliatePage'
 import CategoriesPage from './components/CategoriesPage'
 import BrandsPage from './components/BrandsPage'
+import CreateBrandPage from './components/CreateBrandPage'
 import SourcePage from './components/SourcePage'
 import CartPage from './components/CartPage'
 import AskAmiaPage from './components/AskAmiaPage'
 import SavedPage from './components/SavedPage'
 import SellerExperiencePage from './components/SellerExperiencePage'
 import AboutPage from './components/AboutPage'
+import CareersPage from './components/CareersPage'
+import PressPage from './components/PressPage'
+import LegalPage from './components/LegalPage'
+import ApiPage from './components/ApiPage'
 import AuctionsPage from './components/AuctionsPage'
 import MarketplacesPage from './components/MarketplacesPage'
 import FlashSalesPage from './components/FlashSalesPage'
@@ -27,7 +32,7 @@ import SellerPromotionsPage from './components/SellerPromotionsPage'
 import BuyingPoolsPage from './components/BuyingPoolsPage'
 import PromoFeedbackPopup from './components/PromoFeedbackPopup'
 import ProductPage from './components/ProductPage'
-import CreateCategoryPage from './components/CreateCategoryPage'
+import CreateCategoryPageView from './components/CreateCategoryPage'
 import './App.css'
 
 const categories = [
@@ -139,7 +144,12 @@ function CarouselNav() {
   )
 }
 
+function CreateCategoryPage() {
+  return window.location.pathname === '/brands/create' ? <CreateBrandPage /> : <CreateCategoryPageView />
+}
+
 export default function App() {
+  const caravanUrl = import.meta.env.VITE_CARAVAN_URL || 'http://localhost:5176/'
   const [leftOpen, setLeftOpen] = useState(false)
   const [rightOpen, setRightOpen] = useState(false)
   const isAccountPage = window.location.pathname === '/account'
@@ -150,9 +160,9 @@ export default function App() {
   const isOrdersPage = window.location.pathname === '/account/orders' || window.location.pathname.startsWith('/account/orders/')
   const isBrowsingHistoryPage = window.location.pathname === '/account/history'
   const isWishlistPage = window.location.pathname === '/account/wishlist'
-  const isAffiliatePage = window.location.pathname === '/account/affiliate'
+  const isAffiliatePage = window.location.pathname === '/account/affiliate' || window.location.pathname.startsWith('/account/affiliate/')
   const isCategoriesPage = window.location.pathname === '/categories'
-  const isCreateCategoryPage = window.location.pathname === '/categories/create'
+  const isCreateCategoryPage = window.location.pathname === '/categories/create' || window.location.pathname === '/brands/create'
   const isBrandsPage = window.location.pathname === '/brands'
   const isSourcePage = window.location.pathname === '/source'
   const isCartPage = window.location.pathname === '/cart' || window.location.pathname.startsWith('/checkout/')
@@ -160,6 +170,10 @@ export default function App() {
   const isSavedPage = window.location.pathname === '/saved' || window.location.pathname.startsWith('/saved/')
   const isSellerPage = window.location.pathname === '/sell-on-buyamia' || window.location.pathname.startsWith('/sellers/')
   const isAboutPage = window.location.pathname === '/about'
+  const isCareersPage = window.location.pathname === '/careers'
+  const isPressPage = window.location.pathname === '/press'
+  const isLegalPage = window.location.pathname === '/legal'
+  const isApiPage = window.location.pathname === '/api-docs'
   const isAuctionsPage = window.location.pathname === '/auctions' || window.location.pathname.startsWith('/auctions/')
   const isMarketplacesPage = window.location.pathname === '/marketplaces' || window.location.pathname.startsWith('/marketplaces/')
   const isFlashSalesPage = window.location.pathname === '/flash-sales' || window.location.pathname.startsWith('/flash-sales/')
@@ -215,7 +229,7 @@ export default function App() {
 
       {isCategoriesPage && <div className="category-create-entry shell"><a className="btn btn-charcoal" href="/categories/create">Create Category</a></div>}
 
-      {isCreateCategoryPage ? <CreateCategoryPage /> : productMatch ? <ProductPage id={decodeURIComponent(productMatch[1])} /> : isBuyingPoolsPage ? <BuyingPoolsPage /> : isSellerPromotionsPage ? <SellerPromotionsPage /> : isFastSellingPage ? <FastSellingPage /> : isFlashSalesPage ? <FlashSalesPage /> : isMarketplacesPage ? <MarketplacesPage /> : isAuctionsPage ? <AuctionsPage /> : isAboutPage ? <AboutPage /> : isSellerPage ? <SellerExperiencePage /> : isSavedPage ? <SavedPage /> : isAskAmiaPage ? <AskAmiaPage /> : isCartPage ? <CartPage /> : isAccountPage ? <AccountPage /> : isShippingAddressesPage ? <ShippingAddressesPage /> : isSecurityPage ? <SecurityPage /> : isBankAccountsPage ? <BankAccountsPage /> : isOrdersPage ? <OrdersPage /> : isBrowsingHistoryPage ? <BrowsingHistoryPage /> : isWishlistPage ? <WishlistPage /> : isAffiliatePage ? <AffiliatePage /> : isCategoriesPage ? <CategoriesPage /> : isBrandsPage ? <BrandsPage /> : isSourcePage ? <SourcePage /> : isSupportPage ? <SupportPage /> : <>
+      {isCreateCategoryPage ? <CreateCategoryPage /> : productMatch ? <ProductPage id={decodeURIComponent(productMatch[1])} /> : isBuyingPoolsPage ? <BuyingPoolsPage /> : isSellerPromotionsPage ? <SellerPromotionsPage /> : isFastSellingPage ? <FastSellingPage /> : isFlashSalesPage ? <FlashSalesPage /> : isMarketplacesPage ? <MarketplacesPage /> : isAuctionsPage ? <AuctionsPage /> : isApiPage ? <ApiPage /> : isLegalPage ? <LegalPage /> : isPressPage ? <PressPage /> : isCareersPage ? <CareersPage /> : isAboutPage ? <AboutPage /> : isSellerPage ? <SellerExperiencePage /> : isSavedPage ? <SavedPage /> : isAskAmiaPage ? <AskAmiaPage /> : isCartPage ? <CartPage /> : isAccountPage ? <AccountPage /> : isShippingAddressesPage ? <ShippingAddressesPage /> : isSecurityPage ? <SecurityPage /> : isBankAccountsPage ? <BankAccountsPage /> : isOrdersPage ? <OrdersPage /> : isBrowsingHistoryPage ? <BrowsingHistoryPage /> : isWishlistPage ? <WishlistPage /> : isAffiliatePage ? <AffiliatePage /> : isCategoriesPage ? <CategoriesPage /> : isBrandsPage ? <BrandsPage /> : isSourcePage ? <SourcePage /> : isSupportPage ? <SupportPage /> : <>
       <main>
         <section className="shell hero">
           <div className="hero-top">
@@ -231,9 +245,14 @@ export default function App() {
                     from single orders to full container sourcing.
                   </p>
                 </div>
-                <a className="btn btn-charcoal" href="/marketplaces">
-                  Browse Marketplace
-                </a>
+                <div className="hero-actions">
+                  <a className="btn btn-charcoal" href="/marketplaces">
+                    Browse Marketplace
+                  </a>
+                  <a className="btn btn-accent" href="/sellers/seller-sari">
+                    View Supplier Node
+                  </a>
+                </div>
               </div>
             </div>
 
@@ -262,10 +281,10 @@ export default function App() {
           <div className="live-panel">
             <aside className="live-side">
               <div className="mode-list">
-                <button className="active" type="button">
+                <button className="active" type="button" onClick={() => window.open('http://localhost:3000', '_blank', 'noopener,noreferrer')}>
                   See live feeds <span>→</span>
                 </button>
-                <button type="button">Shop with friends</button>
+                <button type="button" onClick={() => window.open(caravanUrl, '_blank', 'noopener,noreferrer')}>Shop with friends</button>
                 <button type="button">Buy in bulk</button>
                 <button type="button">Build smarter with Buyamia&apos;s API</button>
               </div>
@@ -556,35 +575,35 @@ export default function App() {
             <ul>
               <li><a href="/marketplaces">Marketplace</a></li>
               <li><a href="/auctions">Auctions</a></li>
-              <li>Collections</li>
+              <li><a href="/categories">Collections</a></li>
               <li><a href="/buying-pools">Buying Pools</a></li>
             </ul>
           </div>
           <div>
             <h4>Services</h4>
             <ul>
-              <li>Amia AI</li>
-              <li>Sourcing</li>
-              <li>Logistics</li>
-              <li>API</li>
+              <li><a href="/ask-amia">Amia AI</a></li>
+              <li><a href="/source">Sourcing</a></li>
+              <li><a href="/account/orders">Logistics</a></li>
+              <li><a href="/api-docs">API</a></li>
             </ul>
           </div>
           <div>
             <h4>Company</h4>
             <ul>
-              <li>About</li>
-              <li>Impact</li>
-              <li>Careers</li>
-              <li>Press</li>
+              <li><a href="/about">About</a></li>
+              <li><a href="#impact">Impact</a></li>
+              <li><a href="/careers">Careers</a></li>
+              <li><a href="/press">Press</a></li>
             </ul>
           </div>
           <div>
             <h4>Support</h4>
             <ul>
-              <li>Help Center</li>
-              <li>Contact</li>
-              <li>Seller Guide</li>
-              <li>Legal</li>
+              <li><a href="/support">Help Center</a></li>
+              <li><a href="/support#contact">Contact</a></li>
+              <li><a href="/sell-on-buyamia">Seller Guide</a></li>
+              <li><a href="/legal">Legal</a></li>
             </ul>
           </div>
         </div>

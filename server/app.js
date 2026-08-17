@@ -121,6 +121,7 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
       const user = await userForRequest(request, services)
       let params
 
+      if (request.method === 'GET' && pathname === '/.well-known/buyamia-node') return json(response, 200, await services.nodeManifest.get(searchParams.get('supplier')), { ...corsHeaders, 'Cache-Control': 'public, max-age=3600' })
       if (request.method === 'GET' && pathname === '/api/health') return json(response, 200, { status: 'ok', service: 'buyamia-api', timestamp: new Date().toISOString() }, corsHeaders)
       if (request.method === 'POST' && pathname === '/api/auth/signup') {
         const result = await services.auth.signup(await readJson(request), authRequestMeta(request))
@@ -245,6 +246,7 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
       }
 
       if (request.method === 'GET' && pathname === '/api/affiliate-program') return json(response, 200, { data: await services.affiliate.get() }, corsHeaders)
+      if (request.method === 'GET' && pathname === '/api/affiliate-program/application') return json(response, 200, { data: await services.affiliate.application(user) }, corsHeaders)
       if (request.method === 'POST' && pathname === '/api/affiliate-program/applications') return json(response, 201, { data: await services.affiliate.apply(await readJson(request), user) }, corsHeaders)
 
       if (request.method === 'GET' && pathname === '/api/support/categories') return json(response, 200, await services.support.categories(), corsHeaders)

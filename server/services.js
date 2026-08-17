@@ -1,5 +1,6 @@
 import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
+import { buildNodeManifest } from './node-manifest.js'
 
 const scryptAsync = promisify(scrypt)
 
@@ -974,12 +975,28 @@ export function createServices(store, environment = process.env) {
 
   const affiliate = {
     async get() { return store.read('affiliateProgram') },
+    async application(user) {
+      if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to view your affiliate application')
+      return (await store.read('affiliateApplications')).filter((item) => item.userId === user.id).sort(newestFirst)[0] || null
+    },
     async apply(body, user) {
+      if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to create an affiliate application')
+      const name = text(body.name, 'name', { min: 2, max: 120 })
+      const email = normalizeEmail(body.email)
+      const publicName = text(body.publicName, 'publicName', { max: 120, required: false })
       const website = text(body.website, 'website', { max: 240, required: false })
-      const motivation = text(body.motivation, 'motivation', { max: 1500 })
+      const country = text(body.country, 'country', { max: 80 })
+      const preferredLanguage = text(body.preferredLanguage, 'preferredLanguage', { max: 40 })
+      const biography = text(body.biography, 'biography', { min: 10, max: 600 })
+      const motivation = text(body.motivation, 'motivation', { min: 10, max: 1500 })
+      if (!Array.isArray(body.categoryIds) || !body.categoryIds.length || body.categoryIds.length > 12 || body.categoryIds.some((item) => typeof item !== 'string')) throw new ApiError(400, 'VALIDATION_ERROR', 'categoryIds must contain between 1 and 12 category IDs')
+      const categoryIds = [...new Set(body.categoryIds)]
       return store.mutate((db) => {
-        if (db.affiliateApplications.some((item) => item.userId === user.id && item.status === 'pending')) throw new ApiError(409, 'APPLICATION_EXISTS', 'A pending application already exists')
-        const application = { id: store.id('affiliate'), userId: user.id, website, motivation, status: 'pending', createdAt: new Date().toISOString() }
+        const invalidCategoryIds = categoryIds.filter((id) => !db.categories.some((item) => item.id === id && item.active))
+        if (invalidCategoryIds.length) throw new ApiError(400, 'VALIDATION_ERROR', 'One or more category IDs are invalid', { categoryIds: invalidCategoryIds })
+        if (db.affiliateApplications.some((item) => item.userId === user.id && ['pending', 'approved'].includes(item.status))) throw new ApiError(409, 'APPLICATION_EXISTS', 'An active affiliate application already exists')
+        const timestamp = new Date().toISOString()
+        const application = { id: store.id('affiliate'), userId: user.id, name, email, publicName: publicName || null, website: website || null, country, preferredLanguage, biography, motivation, categoryIds, status: 'pending', createdAt: timestamp, updatedAt: timestamp }
         db.affiliateApplications.push(application)
         return application
       })
@@ -1394,5 +1411,16 @@ export function createServices(store, environment = process.env) {
     },
   }
 
-  return { auth, about, categories, products, marketplace, buyingPools, flashSales, fastSelling, sellerPromotions, brands, source, search, community, chat, account, affiliate, support, cart, checkout, orders, seller, auctions, auctionListings, concierge, promoFeedback }
+  const nodeManifest = {
+    async get(supplierId) {
+      const [profiles, brands, products, pools, participants] = await Promise.all(['sellerProfiles', 'brands', 'products', 'buyingPools', 'buyingPoolParticipants'].map((name) => store.read(name)))
+      const eligible = profiles.filter((item) => item.public && item.verificationStatus === 'approved').sort((a, b) => a.id.localeCompare(b.id))
+      const supplier = supplierId ? eligible.find((item) => item.id === supplierId) : eligible[0]
+      if (!supplier) throw new ApiError(404, 'NODE_MANIFEST_NOT_FOUND', 'No public verified supplier node is available')
+      const brand = brands.find((item) => item.id === supplier.brandId) || null
+      return buildNodeManifest({ supplier, brand, products, pools, participants })
+    },
+  }
+
+  return { auth, about, categories, products, marketplace, buyingPools, flashSales, fastSelling, sellerPromotions, brands, source, search, community, chat, account, affiliate, support, cart, checkout, orders, seller, auctions, auctionListings, concierge, promoFeedback, nodeManifest }
 }
