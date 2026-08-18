@@ -377,7 +377,7 @@ export function createServices(store, environment = process.env) {
   }
 
   const products = {
-    async detail(id) {
+    async detail(id, query = new URLSearchParams()) {
       const [items, categoryRows, brandRows, profiles, aboutPage] = await Promise.all([store.read('products'), store.read('categories'), store.read('brands'), store.read('sellerProfiles'), store.read('aboutPage')])
       const product = items.find((item) => item.id === id && item.active)
       if (!product) throw new ApiError(404, 'PRODUCT_NOT_FOUND', 'Product not found')
@@ -388,7 +388,9 @@ export function createServices(store, environment = process.env) {
       const seller = brand ? { id: brand.id, name: brand.name, location: brand.country, description: brand.description, verified: brand.verified } : profile ? { id: profile.id, name: profile.displayName, location: profile.businessAddress?.country || 'Indonesia', description: profile.description || 'Verified Indonesian maker supplying thoughtfully made products.', verified: profile.verificationStatus === 'approved' } : { id: 'buyamia-maker', name: 'Buyamia Maker', location: 'Indonesia', description: 'Verified Indonesian maker supplying thoughtfully made products.', verified: true }
       const related = items.filter((item) => item.active && item.id !== product.id && item.categoryId === product.categoryId)
       const recommendations = [...related, ...items.filter((item) => item.active && item.id !== product.id && item.categoryId !== product.categoryId)].slice(0, 4)
-      return { ...detailed, category: category || null, seller, relatedProducts: recommendations, collectionProducts: recommendations.slice(0, 2), bundles: [...items.filter((item) => item.active && item.id !== product.id)].slice(0, 4), confidence: aboutPage.confidence.cards, information: { general: 'Discover exceptional products on Buyamia, the leading B2B marketplace for sourcing unique and high-quality goods from Indonesia. Every product is carefully presented to support transparent, confident purchasing decisions.', product: detailed.description, shipping: `Available shipping options: ${detailed.shipping.join(' and ')}. Final delivery pricing and timing are confirmed with your quote.` } }
+      const flashSaleId = text(query.get('flashSale'), 'flashSale', { max: 160, required: false })
+      const flashSale = flashSaleId ? await activeFlashSaleOfferForProduct(flashSaleId, product.id, 1) : null
+      return { ...detailed, ...(flashSale ? { price: flashSale.salePrice, originalPrice: product.price, flashSale } : {}), category: category || null, seller, relatedProducts: recommendations, collectionProducts: recommendations.slice(0, 2), bundles: [...items.filter((item) => item.active && item.id !== product.id)].slice(0, 4), confidence: aboutPage.confidence.cards, information: { general: 'Discover exceptional products on Buyamia, the leading B2B marketplace for sourcing unique and high-quality goods from Indonesia. Every product is carefully presented to support transparent, confident purchasing decisions.', product: detailed.description, shipping: `Available shipping options: ${detailed.shipping.join(' and ')}. Final delivery pricing and timing are confirmed with your quote.` } }
     },
     async requestQuote(id, body, user) {
       const product = (await store.read('products')).find((item) => item.id === id && item.active)
@@ -547,6 +549,16 @@ export function createServices(store, environment = process.env) {
       const managementStatus = status === 'upcoming' ? 'scheduled' : status === 'expired' ? 'ended' : status
       return { ...sale, status, managementStatus, remainingMs: status === 'active' ? Math.max(0, end - Date.now()) : 0, startsInMs: status === 'upcoming' ? Math.max(0, start - Date.now()) : 0, products: saleProducts, productCount: saleProducts.length, categories: [...new Set(saleProducts.map((item) => item.categoryId))] }
     })
+  }
+
+  async function activeFlashSaleOfferForProduct(saleId, productId, quantity = 1) {
+    const sale = (await flashSaleRows()).find((item) => item.id === saleId && item.status === 'active')
+    if (!sale) throw new ApiError(404, 'FLASH_SALE_NOT_FOUND', 'Active flash sale not found')
+    const product = sale.products.find((item) => item.id === productId && item.availability)
+    if (!product) throw new ApiError(404, 'FLASH_SALE_PRODUCT_NOT_FOUND', 'Product is not available in this flash sale')
+    if (!Number.isInteger(quantity) || quantity < 1) throw new ApiError(400, 'VALIDATION_ERROR', 'quantity must be a positive integer')
+    if (quantity > product.remainingStock) throw new ApiError(409, 'INSUFFICIENT_FLASH_SALE_STOCK', `Only ${product.remainingStock} flash sale units are available`)
+    return { id: sale.id, title: sale.title, status: sale.status, startTime: sale.startTime, endTime: sale.endTime, productId: product.id, originalPrice: product.originalPrice, salePrice: product.salePrice, discountPercent: product.discountPercent, remainingStock: product.remainingStock }
   }
 
   async function flashSaleSupplier(user) {
@@ -953,6 +965,7 @@ export function createServices(store, environment = process.env) {
     async wishlistCount(user) { return { count: (await store.read('wishlists')).filter((item) => item.userId === user.id).length } },
     async addWishlist(body, user) { const productId = text(body.productId, 'productId', { max: 120 }); const product = (await store.read('products')).find((item) => item.id === productId && item.active); if (!product) throw new ApiError(404, 'PRODUCT_NOT_FOUND', 'Product not found'); return store.mutate((db) => { if (db.wishlists.some((item) => item.userId === user.id && item.productId === productId)) throw new ApiError(409, 'WISHLIST_ITEM_EXISTS', 'Product is already in your wishlist'); const item = { id: store.id('wishlist'), userId: user.id, productId, createdAt: new Date().toISOString() }; db.wishlists.push(item); return { ...item, product } }) },
     async removeWishlist(id, user) { const wishlistId = text(id, 'wishlistId', { max: 160 }); return store.mutate((db) => { const index = db.wishlists.findIndex((item) => item.id === wishlistId && item.userId === user.id); if (index < 0) throw new ApiError(404, 'WISHLIST_ITEM_NOT_FOUND', 'Wishlist item not found'); return db.wishlists.splice(index, 1)[0] }) },
+    async removeSavedProduct(productId, user) { const id = text(productId, 'productId', { max: 120 }); return store.mutate((db) => { const product = db.products.find((item) => item.id === id && item.active); if (!product) throw new ApiError(404, 'PRODUCT_NOT_FOUND', 'Product not found'); const index = db.wishlists.findIndex((item) => item.userId === user.id && item.productId === id); if (index < 0) throw new ApiError(404, 'SAVED_ITEM_NOT_FOUND', 'Saved item not found'); return db.wishlists.splice(index, 1)[0] }) },
     async clearWishlist(user) { return store.mutate((db) => { const removed = db.wishlists.filter((item) => item.userId === user.id); db.wishlists = db.wishlists.filter((item) => item.userId !== user.id); return { removed: removed.length } }) },
     async moveWishlistToCart(id, user) { return store.mutate((db) => { const item = db.wishlists.find((entry) => entry.id === id && entry.userId === user.id); if (!item) throw new ApiError(404, 'WISHLIST_ITEM_NOT_FOUND', 'Wishlist item not found'); let cartItem = db.cartItems.find((entry) => entry.userId === user.id && entry.productId === item.productId); if (!cartItem) { cartItem = { id: store.id('cart'), userId: user.id, productId: item.productId, quantity: 1, createdAt: new Date().toISOString() }; db.cartItems.push(cartItem) }; db.wishlists.splice(db.wishlists.indexOf(item), 1); return { item, cartItem } }) },
     async saved(query, user) {
@@ -963,7 +976,35 @@ export function createServices(store, environment = process.env) {
       const products = await store.read('products'); const productById = new Map(products.map((item) => [item.id, item])); let rows = (await store.read('wishlists')).filter((item) => item.userId === user.id && (!collectionId || item.collectionId === collectionId)).map((item) => ({ ...item, type: 'product', product: productById.get(item.productId) })).filter((item) => item.product && (!category || item.product.categoryId === category) && (!q || `${item.product.title} ${item.product.categoryId}`.toLowerCase().includes(q)))
       const sorters = { newest: (a, b) => new Date(b.createdAt) - new Date(a.createdAt), oldest: (a, b) => new Date(a.createdAt) - new Date(b.createdAt), 'price-asc': (a, b) => a.product.price - b.product.price, 'price-desc': (a, b) => b.product.price - a.product.price, name: (a, b) => a.product.title.localeCompare(b.product.title) }; rows.sort(sorters[sort]); return paginate(rows, query)
     },
-    async saveItem(body, user) { if (body.collectionId && !(await store.read('savedCollections')).some((entry) => entry.id === body.collectionId && entry.userId === user.id)) throw new ApiError(404, 'COLLECTION_NOT_FOUND', 'Saved collection not found'); const item = await this.addWishlist(body, user); if (body.collectionId) { await this.addCollectionItem(body.collectionId, { savedItemId: item.id }, user); item.collectionId = body.collectionId } return item },
+    async saveItem(body, user) {
+      const productId = text(body.productId, 'productId', { max: 120 })
+      const collectionId = text(body.collectionId, 'collectionId', { max: 160, required: false })
+      if (collectionId && !(await store.read('savedCollections')).some((entry) => entry.id === collectionId && entry.userId === user.id)) throw new ApiError(404, 'COLLECTION_NOT_FOUND', 'Saved collection not found')
+      const product = (await store.read('products')).find((item) => item.id === productId && item.active)
+      if (!product) throw new ApiError(404, 'PRODUCT_NOT_FOUND', 'Product not found')
+      const item = await store.mutate((db) => {
+        const timestamp = new Date().toISOString()
+        const existing = db.wishlists.find((entry) => entry.userId === user.id && entry.productId === productId)
+        if (existing) {
+          if (collectionId) {
+            existing.collectionId = collectionId
+            existing.updatedAt = timestamp
+          }
+          return { ...existing, product, existing: true }
+        }
+        const created = { id: store.id('wishlist'), userId: user.id, productId, ...(collectionId ? { collectionId } : {}), createdAt: timestamp }
+        db.wishlists.push(created)
+        return { ...created, product, existing: false }
+      })
+      return item
+    },
+    async savedStatus(query, user) {
+      const productId = text(query.get('productId'), 'productId', { max: 120 })
+      const product = (await store.read('products')).find((item) => item.id === productId && item.active)
+      if (!product) throw new ApiError(404, 'PRODUCT_NOT_FOUND', 'Product not found')
+      const item = (await store.read('wishlists')).find((entry) => entry.userId === user.id && entry.productId === productId)
+      return { productId, saved: Boolean(item), item: item || null }
+    },
     async collections(user) { const saved = await store.read('wishlists'); return (await store.read('savedCollections')).filter((item) => item.userId === user.id).map((item) => ({ ...item, itemCount: saved.filter((savedItem) => savedItem.userId === user.id && savedItem.collectionId === item.id).length })).sort(newestFirst) },
     async createCollection(body, user) { const name = text(body.name, 'name', { max: 80 }); return store.mutate((db) => { if (db.savedCollections.some((item) => item.userId === user.id && item.name.toLowerCase() === name.toLowerCase())) throw new ApiError(409, 'COLLECTION_EXISTS', 'A collection with this name already exists'); const timestamp = new Date().toISOString(); const collection = { id: store.id('collection'), userId: user.id, name, createdAt: timestamp, updatedAt: timestamp }; db.savedCollections.push(collection); return collection }) },
     async updateCollection(id, body, user) { const name = text(body.name, 'name', { max: 80 }); return store.mutate((db) => { const collection = db.savedCollections.find((item) => item.id === id && item.userId === user.id); if (!collection) throw new ApiError(404, 'COLLECTION_NOT_FOUND', 'Saved collection not found'); if (db.savedCollections.some((item) => item.userId === user.id && item.id !== id && item.name.toLowerCase() === name.toLowerCase())) throw new ApiError(409, 'COLLECTION_EXISTS', 'A collection with this name already exists'); collection.name = name; collection.updatedAt = new Date().toISOString(); return collection }) },
@@ -1075,8 +1116,17 @@ export function createServices(store, environment = process.env) {
       if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 999) throw new ApiError(400, 'INVALID_CART_QUANTITY', 'Cart contains an invalid quantity')
       if (!Number.isInteger(item.packSize) || item.packSize < 1 || item.packSize > 999) throw new ApiError(400, 'INVALID_CART_QUANTITY', 'Cart contains an invalid pack size')
       if (!['air', 'sea'].includes(item.shippingMethod || 'sea')) throw new ApiError(400, 'INVALID_SHIPPING_METHOD', 'Cart contains an invalid shipping method')
-      const unitPrice = product.price
-      return { ...item, product, unitPrice, shippingMethod: item.shippingMethod || 'sea', lineTotal: unitPrice * item.quantity, availableStock: product.stock ?? 100 }
+      let flashSale = null
+      if (item.flashSaleId) {
+        const sale = db.flashSales.find((entry) => entry.id === item.flashSaleId)
+        const status = sale ? flashSaleStatus(sale) : null
+        const saleProduct = sale?.products?.find((entry) => entry.productId === item.productId)
+        if (status !== 'active' || !saleProduct) throw new ApiError(409, 'FLASH_SALE_UNAVAILABLE', 'A cart flash sale is no longer available')
+        if (item.quantity > saleProduct.remainingStock) throw new ApiError(409, 'INSUFFICIENT_FLASH_SALE_STOCK', `Only ${saleProduct.remainingStock} flash sale units are available`)
+        flashSale = { id: sale.id, title: sale.title, salePrice: saleProduct.salePrice, originalPrice: product.price, discountPercent: Math.round((1 - saleProduct.salePrice / product.price) * 100), remainingStock: saleProduct.remainingStock, endTime: sale.endTime }
+      }
+      const unitPrice = flashSale?.salePrice ?? product.price
+      return { ...item, product, unitPrice, flashSale, shippingMethod: item.shippingMethod || 'sea', lineTotal: unitPrice * item.quantity, availableStock: flashSale?.remainingStock ?? product.stock ?? 100 }
     })
     const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0)
     const shipping = items.length ? (items.some((item) => item.shippingMethod === 'air') ? 600000 : 350000) : 0
@@ -1148,19 +1198,22 @@ export function createServices(store, environment = process.env) {
       const packSize = positiveInteger(body.packSize ?? product.minimumOrder ?? 1, 'packSize')
       const minimumOrder = product.minimumOrder ?? 1
       if (packSize < minimumOrder) throw new ApiError(400, 'MINIMUM_ORDER_REQUIRED', `Minimum order is ${minimumOrder} pcs`)
-      const stock = product.stock ?? 100; if (quantity > stock) throw new ApiError(409, 'INSUFFICIENT_STOCK', `Only ${stock} units are available`)
+      const flashSaleId = text(body.flashSaleId, 'flashSaleId', { max: 160, required: false }) || null
+      const flashSaleOffer = flashSaleId ? await activeFlashSaleOfferForProduct(flashSaleId, productId, quantity) : null
+      const stock = flashSaleOffer?.remainingStock ?? product.stock ?? 100; if (quantity > stock) throw new ApiError(409, flashSaleOffer ? 'INSUFFICIENT_FLASH_SALE_STOCK' : 'INSUFFICIENT_STOCK', `Only ${stock} units are available`)
       await store.mutate((db) => {
         const timestamp = new Date().toISOString()
-        const existing = db.cartItems.find((item) => item.userId === user.id && item.productId === productId && item.packSize === packSize && (item.shippingMethod || 'sea') === 'sea' && (item.customization || 'No') === 'No' && (item.warranty || 'No') === 'No')
+        const existing = db.cartItems.find((item) => item.userId === user.id && item.productId === productId && (item.flashSaleId || null) === flashSaleId && item.packSize === packSize && (item.shippingMethod || 'sea') === 'sea' && (item.customization || 'No') === 'No' && (item.warranty || 'No') === 'No')
         if (existing) {
           const nextQuantity = existing.quantity + quantity
-          if (nextQuantity > stock) throw new ApiError(409, 'INSUFFICIENT_STOCK', `Only ${stock} units are available`)
+          if (nextQuantity > stock) throw new ApiError(409, flashSaleOffer ? 'INSUFFICIENT_FLASH_SALE_STOCK' : 'INSUFFICIENT_STOCK', `Only ${stock} units are available`)
           existing.quantity = nextQuantity
-          existing.unitPrice = product.price
+          existing.unitPrice = flashSaleOffer?.salePrice ?? product.price
+          existing.flashSaleId = flashSaleId
           existing.updatedAt = timestamp
           return
         }
-        const item = { id: store.id('cart'), userId: user.id, productId, quantity, packSize, unitPrice: product.price, shippingMethod: 'sea', customization: 'No', warranty: 'No', createdAt: timestamp }
+        const item = { id: store.id('cart'), userId: user.id, productId, quantity, packSize, unitPrice: flashSaleOffer?.salePrice ?? product.price, ...(flashSaleId ? { flashSaleId } : {}), shippingMethod: 'sea', customization: 'No', warranty: 'No', createdAt: timestamp }
         db.cartItems.push(item)
       })
       return cartView(user)
@@ -1210,6 +1263,14 @@ export function createServices(store, environment = process.env) {
         if (existing) return { order: enrichOrder(existing, db.products), created: false }
         const cartData = cartFromState(db, user)
         if (!cartData.items.length) throw new ApiError(409, 'EMPTY_CART', 'Add an item to your cart before placing an order')
+        for (const item of cartData.items.filter((entry) => entry.flashSaleId)) {
+          const sale = db.flashSales.find((entry) => entry.id === item.flashSaleId)
+          const saleProduct = sale?.products?.find((entry) => entry.productId === item.productId)
+          if (!sale || flashSaleStatus(sale) !== 'active' || !saleProduct) throw new ApiError(409, 'FLASH_SALE_UNAVAILABLE', 'A cart flash sale is no longer available')
+          if (item.quantity > saleProduct.remainingStock) throw new ApiError(409, 'INSUFFICIENT_FLASH_SALE_STOCK', `Only ${saleProduct.remainingStock} flash sale units are available`)
+          saleProduct.remainingStock -= item.quantity
+          sale.updatedAt = new Date().toISOString()
+        }
         const timestamp = new Date().toISOString()
         const orderId = store.id('order')
         const shortId = orderId.replace(/^order_/, '').replace(/-/g, '').slice(0, 8).toUpperCase()
@@ -1228,6 +1289,7 @@ export function createServices(store, environment = process.env) {
           shippingMethod: item.shippingMethod,
           customization: item.customization || 'No',
           warranty: item.warranty || 'No',
+          flashSale: item.flashSale ? { id: item.flashSale.id, title: item.flashSale.title, originalPrice: item.flashSale.originalPrice, salePrice: item.flashSale.salePrice, discountPercent: item.flashSale.discountPercent } : null,
           product: { id: item.product.id, title: item.product.title, image: item.product.image, categoryId: item.product.categoryId },
         }))
         const order = {

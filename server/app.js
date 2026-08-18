@@ -202,7 +202,7 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
 
       if (request.method === 'GET' && pathname === '/api/products') return json(response, 200, await services.marketplace.products(searchParams), corsHeaders)
       if ((params = match(pathname, /^\/api\/products\/([^/]+)\/quotes$/)) && request.method === 'POST') return json(response, 201, { data: await services.products.requestQuote(params[0], await readJson(request), user) }, corsHeaders)
-      if ((params = match(pathname, /^\/api\/products\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.products.detail(params[0]) }, corsHeaders)
+      if ((params = match(pathname, /^\/api\/products\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.products.detail(params[0], searchParams) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/brands') return json(response, 200, await services.brands.list(searchParams), corsHeaders)
       if ((params = match(pathname, /^\/api\/brands\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.brands.detail(params[0]) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/source') return json(response, 200, await services.source.list(searchParams), corsHeaders)
@@ -386,6 +386,7 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
       if ((params = match(pathname, /^\/api\/account\/wishlist\/([^/]+)$/)) && request.method === 'DELETE') return json(response, 200, { data: await services.account.removeWishlist(params[0], user) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/saved') return json(response, 200, await services.account.saved(searchParams, user), corsHeaders)
       if (request.method === 'POST' && pathname === '/api/saved') return json(response, 201, { data: await services.account.saveItem(await readJson(request), user) }, corsHeaders)
+      if (request.method === 'GET' && pathname === '/api/saved/status') return json(response, 200, { data: await services.account.savedStatus(searchParams, user) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/saved/recommendations') return json(response, 200, { data: await services.account.savedRecommendations(user) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/saved/collections') return json(response, 200, { data: await services.account.collections(user) }, corsHeaders)
       if (request.method === 'POST' && pathname === '/api/saved/collections') return json(response, 201, { data: await services.account.createCollection(await readJson(request), user) }, corsHeaders)
@@ -395,6 +396,7 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
         if (request.method === 'PATCH') return json(response, 200, { data: await services.account.updateCollection(params[0], await readJson(request), user) }, corsHeaders)
         if (request.method === 'DELETE') return json(response, 200, { data: await services.account.deleteCollection(params[0], user) }, corsHeaders)
       }
+      if ((params = match(pathname, /^\/api\/saved\/products\/([^/]+)$/)) && request.method === 'DELETE') return json(response, 200, { data: await services.account.removeSavedProduct(params[0], user) }, corsHeaders)
       if ((params = match(pathname, /^\/api\/saved\/([^/]+)$/)) && request.method === 'DELETE') return json(response, 200, { data: await services.account.removeWishlist(params[0], user) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/account/history') return json(response, 200, await services.account.history(searchParams, user), corsHeaders)
       if (request.method === 'POST' && pathname === '/api/account/history') return json(response, 201, { data: await services.account.recordHistory(await readJson(request), user) }, corsHeaders)
