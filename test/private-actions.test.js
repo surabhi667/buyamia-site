@@ -163,13 +163,20 @@ test('newsletter subscribe persists a real subscription without authentication',
   assert.equal(subscriptions[0].email, 'reader@example.com')
 })
 
-test('Ask Amia chat creates a persisted conversation through the public chat API', async (t) => {
+test('Ask Amia chat requires authentication and persists an authenticated conversation', async (t) => {
   const { request, store } = await withApi(t)
-  const { response, payload } = await request('/api/ask-amia/chat', { method: 'POST', body: { prompt: 'Find verified furniture suppliers' } })
+  const anonymous = await request('/api/ask-amia/chat', { method: 'POST', body: { prompt: 'Find verified furniture suppliers' } })
+  assert.equal(anonymous.response.status, 401)
+  assert.equal(anonymous.payload.error.code, 'AUTHENTICATION_REQUIRED')
+
+  const cookie = await signup(request)
+  const { response, payload } = await request('/api/ask-amia/chat', { method: 'POST', cookie, body: { prompt: 'Find verified furniture suppliers' } })
   assert.equal(response.status, 201)
   assert.ok(payload.data.conversationId)
   assert.equal(payload.data.assistantMessage.role, 'assistant')
+  assert.equal(payload.data.assistantMessage.mocked, true)
 
   const conversations = await store.read('conversations')
   assert.equal(conversations.length, 1)
+  assert.notEqual(conversations[0].userId, 'demo-user')
 })

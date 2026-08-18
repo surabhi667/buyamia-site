@@ -5,6 +5,8 @@ function AmiaFooter() {
   return <AccountFooter className="amia-page__footer shell" />
 }
 
+function requestAuth() { window.dispatchEvent(new CustomEvent('buyamia:auth-required', { detail: { mode: 'login' } })) }
+
 function ProductResults({ products = [] }) {
   if (!products.length) return null
   return <div className="amia-page__products">{products.map((product) => <a href={`/products/${product.id}`} key={product.id}><img src={product.image} alt="" /><span><strong>{product.title}</strong><small>{new Intl.NumberFormat('en-US', { style: 'currency', currency: product.currency, maximumFractionDigits: 0 }).format(product.price)}</small></span></a>)}</div>
@@ -12,7 +14,7 @@ function ProductResults({ products = [] }) {
 
 export default function AskAmiaPage() {
   const [conversations, setConversations] = useState([]); const [suggestions, setSuggestions] = useState({ recommended: [], quickActions: [], recentlyAsked: [] }); const [activeId, setActiveId] = useState(null); const [messages, setMessages] = useState([]); const [draft, setDraft] = useState(() => new URLSearchParams(window.location.search).get('prompt') || ''); const [loading, setLoading] = useState(true); const [sending, setSending] = useState(false); const [error, setError] = useState(''); const historyRef = useRef(null)
-  async function api(url, options) { const response = await fetch(url, { credentials: 'include', ...(options || {}) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message || 'Amia is unavailable right now.'); return payload }
+  async function api(url, options) { const response = await fetch(url, { credentials: 'include', ...(options || {}) }); const payload = await response.json(); if (response.status === 401) requestAuth(); if (!response.ok) throw new Error(payload.error?.message || 'Amia is unavailable right now.'); return payload }
   async function loadMessages(id) { setError(''); try { const payload = await api(`/api/ask-amia/conversations/${encodeURIComponent(id)}/messages?limit=100`); setMessages(payload.data); setActiveId(id) } catch (caught) { setError(caught.message) } }
   async function load() { setLoading(true); setError(''); try { const payload = await api('/api/ask-amia'); setConversations(payload.data.conversations); setSuggestions(payload.data.suggestions); if (payload.data.conversations[0]) await loadMessages(payload.data.conversations[0].id) } catch (caught) { setError(caught.message) } finally { setLoading(false) } }
   useEffect(() => { load() }, [])

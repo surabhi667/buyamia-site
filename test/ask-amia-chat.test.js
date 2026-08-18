@@ -24,13 +24,26 @@ async function withApi(testContext) {
   })
 
   const { port } = server.address()
+  async function request(path, { method = 'GET', body, cookie } = {}) {
+    const headers = {}
+    if (body !== undefined) headers['Content-Type'] = 'application/json'
+    if (cookie) headers.Cookie = cookie
+    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method,
+      headers,
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    })
+    return { response, payload: await response.json() }
+  }
+  const signup = await request('/api/auth/signup', { method: 'POST', body: { name: 'Ask Amia Test User', email: `ask-${Date.now()}-${Math.random()}@example.com`, password: 'StrongPassword123' } })
+  assert.equal(signup.response.status, 201)
+  const cookie = signup.response.headers.get('set-cookie').split(';')[0]
   return async function postChat(body) {
     const response = await fetch(`http://127.0.0.1:${port}/api/ask-amia/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-User-Id': 'ask-amia-test-user',
-        'X-User-Name': 'Ask Amia Test User',
+        Cookie: cookie,
       },
       body: JSON.stringify(body),
     })

@@ -43,7 +43,7 @@ const dummyPasswordHash = '00000000000000000000000000000000:37eb93dcf7f1a0155678
 function tokenHash(token) { return createHash('sha256').update(token).digest('hex') }
 function tokenMatches(token, storedHash) { const actual = Buffer.from(tokenHash(token)); const expected = Buffer.from(String(storedHash || '')); return actual.length === expected.length && timingSafeEqual(actual, expected) }
 function publicSession(session) { const { tokenHash: _tokenHash, ...safe } = session; return safe }
-function publicSecurity(security) { const { passwordHash: _passwordHash, ...safe } = security; return { ...safe, activeSessions: (safe.activeSessions || []).map(publicSession), passwordConfigured: Boolean(_passwordHash) } }
+function publicSecurity(security, currentSessionId = null) { const { passwordHash: _passwordHash, ...safe } = security; return { ...safe, activeSessions: (safe.activeSessions || []).map((session) => ({ ...publicSession(session), current: currentSessionId ? session.id === currentSessionId : Boolean(session.current) })), passwordConfigured: Boolean(_passwordHash) } }
 function newSecurity(user) { const timestamp = new Date().toISOString(); return { userId: user.id, emailVerified: false, phoneVerified: false, twoFactorEnabled: false, activeSessions: [{ id: 'current', current: true, device: 'Current browser', browser: 'Browser', operatingSystem: 'Unknown', location: 'Unknown', createdAt: timestamp }], loginHistory: [{ id: 'current-login', status: 'success', device: 'Current browser', browser: 'Browser', operatingSystem: 'Unknown', location: 'Unknown', createdAt: timestamp }] } }
 const supportedBankCountries = new Set(['ID', 'AU', 'SG', 'US'])
 const supportedBankCurrencies = new Set(['IDR', 'AUD', 'SGD', 'USD'])
@@ -343,10 +343,14 @@ export function createServices(store, environment = process.env) {
         return category
       })
     },
-    async update(id, body) {
+    async update(id, body, user) {
+      if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in with a supplier account to update a category')
+      const supplier = (await store.read('sellerProfiles')).find((item) => item.userId === user.id && item.verificationStatus === 'approved')
+      if (!supplier && user.role !== 'administrator') throw new ApiError(403, 'SUPPLIER_REQUIRED', 'An approved supplier account is required to update a category')
       return store.mutate((db) => {
         const category = db.categories.find((item) => item.id === id)
         if (!category) throw new ApiError(404, 'CATEGORY_NOT_FOUND', 'Category not found')
+        if (category.supplierId && category.supplierId !== supplier?.id && user.role !== 'administrator') throw new ApiError(403, 'CATEGORY_NOT_OWNED', 'This category belongs to another supplier')
         if (body.name !== undefined) category.name = text(body.name, 'name', { max: 80 })
         if (body.children !== undefined) {
           if (!Array.isArray(body.children)) throw new ApiError(400, 'VALIDATION_ERROR', 'children must be an array')
@@ -357,10 +361,15 @@ export function createServices(store, environment = process.env) {
         return category
       })
     },
-    async remove(id) {
+    async remove(id, user) {
+      if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in with a supplier account to delete a category')
+      const supplier = (await store.read('sellerProfiles')).find((item) => item.userId === user.id && item.verificationStatus === 'approved')
+      if (!supplier && user.role !== 'administrator') throw new ApiError(403, 'SUPPLIER_REQUIRED', 'An approved supplier account is required to delete a category')
       return store.mutate((db) => {
         const index = db.categories.findIndex((item) => item.id === id)
         if (index < 0) throw new ApiError(404, 'CATEGORY_NOT_FOUND', 'Category not found')
+        const category = db.categories[index]
+        if (category.supplierId && category.supplierId !== supplier?.id && user.role !== 'administrator') throw new ApiError(403, 'CATEGORY_NOT_OWNED', 'This category belongs to another supplier')
         if (db.products.some((product) => product.categoryId === id)) throw new ApiError(409, 'CATEGORY_IN_USE', 'Category cannot be deleted while products use it')
         return db.categories.splice(index, 1)[0]
       })
@@ -871,7 +880,7 @@ export function createServices(store, environment = process.env) {
       })
     },
     async notifications(query, user) { return paginate([...await store.read('notifications')].filter((item) => item.userId === user.id).sort(newestFirst), query) },
-    async security(user) { const security = (await store.read('accountSecurity')).find((item) => item.userId === user.id); return publicSecurity(security || newSecurity(user)) },
+    async security(user) { const security = (await store.read('accountSecurity')).find((item) => item.userId === user.id); return publicSecurity(security || newSecurity(user), user.sessionId) },
     async updateSecurity(body, user) {
       if (body.twoFactorEnabled !== undefined && typeof body.twoFactorEnabled !== 'boolean') throw new ApiError(400, 'VALIDATION_ERROR', 'twoFactorEnabled must be a boolean')
       const result = await store.mutate((db) => {
@@ -881,7 +890,7 @@ export function createServices(store, environment = process.env) {
         security.updatedAt = new Date().toISOString()
         return security
       })
-      return publicSecurity(result)
+      return publicSecurity(result, user.sessionId)
     },
     async changePassword(body, user) {
       const newPassword = text(body.newPassword, 'newPassword', { min: 12, max: 200 }); const confirmPassword = text(body.confirmPassword, 'confirmPassword', { min: 12, max: 200 })
@@ -890,13 +899,13 @@ export function createServices(store, environment = process.env) {
       const existing = (await store.read('accountSecurity')).find((item) => item.userId === user.id)
       if (existing?.passwordHash) { const currentPassword = text(body.currentPassword, 'currentPassword', { min: 1, max: 200 }); if (!(await passwordMatches(currentPassword, existing.passwordHash))) throw new ApiError(403, 'CURRENT_PASSWORD_INCORRECT', 'The current password is incorrect') }
       const hash = await passwordHash(newPassword)
-      const result = await store.mutate((db) => { let security = db.accountSecurity.find((item) => item.userId === user.id); if (!security) { security = newSecurity(user); db.accountSecurity.push(security) }; security.passwordHash = hash; security.passwordUpdatedAt = new Date().toISOString(); security.activeSessions = security.activeSessions.filter((item) => item.current); security.updatedAt = security.passwordUpdatedAt; return security })
-      return publicSecurity(result)
+      const result = await store.mutate((db) => { let security = db.accountSecurity.find((item) => item.userId === user.id); if (!security) { security = newSecurity(user); db.accountSecurity.push(security) }; security.passwordHash = hash; security.passwordUpdatedAt = new Date().toISOString(); security.activeSessions = security.activeSessions.filter((item) => item.id === user.sessionId); security.updatedAt = security.passwordUpdatedAt; return security })
+      return publicSecurity(result, user.sessionId)
     },
-    async sessions(user) { const security = (await store.read('accountSecurity')).find((item) => item.userId === user.id); return (security || newSecurity(user)).activeSessions.map(publicSession) },
-    async removeSession(id, user) { return store.mutate((db) => { const security = db.accountSecurity.find((item) => item.userId === user.id); if (!security) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Session not found'); const session = security.activeSessions.find((item) => item.id === id); if (!session || session.current) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Session not found'); security.activeSessions = security.activeSessions.filter((item) => item.id !== id); return { id } }) },
+    async sessions(user) { const security = (await store.read('accountSecurity')).find((item) => item.userId === user.id); return (security || newSecurity(user)).activeSessions.map((session) => ({ ...publicSession(session), current: session.id === user.sessionId })) },
+    async removeSession(id, user) { return store.mutate((db) => { const security = db.accountSecurity.find((item) => item.userId === user.id); if (!security) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Session not found'); const session = security.activeSessions.find((item) => item.id === id); if (!session || session.id === user.sessionId) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Session not found'); security.activeSessions = security.activeSessions.filter((item) => item.id !== id); return { id } }) },
     async loginHistory(query, user) { const security = (await store.read('accountSecurity')).find((item) => item.userId === user.id); return paginate([...(security || newSecurity(user)).loginHistory].sort(newestFirst), query) },
-    async logoutAll(user) { const result = await store.mutate((db) => { let security = db.accountSecurity.find((item) => item.userId === user.id); if (!security) { security = newSecurity(user); db.accountSecurity.push(security) }; security.activeSessions = security.activeSessions.filter((item) => item.current); security.updatedAt = new Date().toISOString(); return security }); return publicSecurity(result) },
+    async logoutAll(user) { const result = await store.mutate((db) => { let security = db.accountSecurity.find((item) => item.userId === user.id); if (!security) { security = newSecurity(user); db.accountSecurity.push(security) }; security.activeSessions = security.activeSessions.filter((item) => item.id === user.sessionId); security.updatedAt = new Date().toISOString(); return security }); return publicSecurity(result, user.sessionId) },
     async addresses(query, user) { return paginate((await store.read('shippingAddresses')).filter((item) => item.userId === user.id).sort((a, b) => Number(b.isDefault) - Number(a.isDefault)), query) },
     async saveAddress(body, user, id) {
       const existing = id ? (await store.read('shippingAddresses')).find((item) => item.id === id && item.userId === user.id) : null
@@ -936,7 +945,7 @@ export function createServices(store, environment = process.env) {
     },
     async removeBankAccount(id, user) { const result = await store.mutate((db) => { const index = db.bankAccounts.findIndex((item) => item.id === id && item.userId === user.id); if (index < 0) throw new ApiError(404, 'BANK_ACCOUNT_NOT_FOUND', 'Bank account not found'); return db.bankAccounts.splice(index, 1)[0] }); return publicBankAccount(result) },
     async setDefaultBankAccount(id, user) { const result = await store.mutate((db) => { const account = db.bankAccounts.find((item) => item.id === id && item.userId === user.id); if (!account) throw new ApiError(404, 'BANK_ACCOUNT_NOT_FOUND', 'Bank account not found'); db.bankAccounts.filter((item) => item.userId === user.id).forEach((item) => { item.isDefault = item.id === id }); return account }); return publicBankAccount(result) },
-    async orders(query, user) { const search = normalizeSearch(query.get('q')); const status = query.get('status'); const allowed = ['Pending', 'Confirmed', 'Processing', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled', 'Refunded']; if (status && !allowed.includes(status)) throw new ApiError(400, 'VALIDATION_ERROR', 'status is not supported'); return paginate((await store.read('orders')).filter((item) => item.userId === user.id && (!status || item.status === status) && (!search || normalizeSearch(item.orderNumber).includes(search))).sort(newestFirst), query) },
+    async orders(query, user) { const search = normalizeSearch(query.get('q')); const status = query.get('status'); if (status && !orderStatuses.includes(status)) throw new ApiError(400, 'VALIDATION_ERROR', 'status is not supported'); return paginate((await store.read('orders')).filter((item) => item.userId === user.id && (!status || item.status === status) && (!search || normalizeSearch(item.orderNumber).includes(search))).sort(newestFirst), query) },
     async order(id, user) { const order = (await store.read('orders')).find((item) => item.id === id && item.userId === user.id); if (!order) throw new ApiError(404, 'ORDER_NOT_FOUND', 'Order not found'); const products = await store.read('products'); const productById = new Map(products.map((item) => [item.id, item])); const items = order.items.map((item) => ({ ...item, product: productById.get(item.productId), unitPrice: item.unitPrice ?? productById.get(item.productId)?.price ?? 0 })); const subtotal = order.subtotal ?? items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0); const shippingCost = order.shippingCost ?? 0; const taxes = order.taxes ?? 0; return { ...order, items, subtotal, shippingCost, taxes, total: order.total ?? subtotal + shippingCost + taxes, seller: order.seller || null, shipping: order.shipping || null, payment: order.payment || null, timeline: order.timeline || [{ status: order.status, at: order.updatedAt }], refund: order.refund || null } },
     async tracking(id, user) { const order = await this.order(id, user); return { orderId: order.id, orderNumber: order.orderNumber, status: order.status, trackingNumber: order.trackingNumber || null, deliveryEstimate: order.deliveryEstimate || null, shipping: order.shipping, timeline: order.timeline } },
     async invoice(id, user) { const order = await this.order(id, user); return { invoiceReference: order.invoiceReference || null, orderNumber: order.orderNumber, currency: order.currency, subtotal: order.subtotal, taxes: order.taxes, shippingCost: order.shippingCost, total: order.total, payment: order.payment } },
@@ -1036,19 +1045,24 @@ export function createServices(store, environment = process.env) {
       if (!ticket) throw new ApiError(404, 'SUPPORT_TICKET_NOT_FOUND', 'Support ticket not found')
       return ticket
     },
-    async createTicket(body, user) {
+    async createTicket(body, user, headerIdempotencyKey = null) {
       const title = text(body.title, 'title', { max: 160 })
       const description = text(body.description, 'description', { min: 10, max: 4000 })
       const categoryId = text(body.categoryId, 'categoryId', { max: 80 })
       const priority = text(body.priority || 'normal', 'priority', { max: 20 })
+      const idempotencyKey = text(headerIdempotencyKey || body.idempotencyKey, 'idempotencyKey', { max: 160, required: false }) || null
       if (!(await store.read('supportCategories')).some((item) => item.id === categoryId)) throw new ApiError(400, 'VALIDATION_ERROR', 'categoryId must be a valid support category')
       if (!['low', 'normal', 'high'].includes(priority)) throw new ApiError(400, 'VALIDATION_ERROR', 'priority must be low, normal, or high')
       if (body.attachments !== undefined && (!Array.isArray(body.attachments) || body.attachments.some((item) => !item || typeof item.name !== 'string' || item.name.length > 160))) throw new ApiError(400, 'VALIDATION_ERROR', 'attachments must contain valid file metadata')
       return store.mutate((db) => {
+        if (idempotencyKey) {
+          const existing = db.supportTickets.find((item) => item.userId === user.id && item.idempotencyKey === idempotencyKey)
+          if (existing) return { ticket: existing, created: false }
+        }
         const timestamp = new Date().toISOString()
-        const ticket = { id: store.id('ticket'), userId: user.id, title, description, categoryId, priority, status: 'open', assignedAgent: null, attachments: body.attachments || [], createdAt: timestamp, updatedAt: timestamp }
+        const ticket = { id: store.id('ticket'), userId: user.id, idempotencyKey, title, description, categoryId, priority, status: 'open', assignedAgent: null, attachments: body.attachments || [], createdAt: timestamp, updatedAt: timestamp }
         db.supportTickets.push(ticket)
-        return ticket
+        return { ticket, created: true }
       })
     },
   }
@@ -1342,7 +1356,34 @@ export function createServices(store, environment = process.env) {
     async get(id, user) { const auction = (await auctionRows(user)).find((item) => item.id === id); if (!auction) throw new ApiError(404, 'AUCTION_NOT_FOUND', 'Auction not found'); return auction },
     async featured(user) { return (await auctionRows(user)).filter((item) => item.featured && item.status === 'live').sort((a, b) => a.remainingMs - b.remainingMs).slice(0, 4) },
     async bids(id, query, user) { await this.get(id, user); const rows = (await store.read('auctionBids')).filter((item) => item.auctionId === id).sort((a, b) => b.amount - a.amount || new Date(b.createdAt) - new Date(a.createdAt)).map((item) => ({ ...item, bidder: item.userId === user.id ? 'You' : `Bidder ${item.userId.slice(-4)}` })); return paginate(rows, query) },
-    async placeBid(id, body, user) { const amount = Number(body.amount); if (!Number.isSafeInteger(amount) || amount < 1) throw new ApiError(400, 'VALIDATION_ERROR', 'amount must be a positive whole number'); await store.mutate((db) => { const auction = db.auctions.find((item) => item.id === id); if (!auction) throw new ApiError(404, 'AUCTION_NOT_FOUND', 'Auction not found'); const status = auctionStatus(auction); if (status === 'upcoming') throw new ApiError(409, 'AUCTION_NOT_STARTED', 'This auction has not started'); if (status !== 'live') throw new ApiError(409, 'AUCTION_CLOSED', 'This auction is closed'); const seller = db.sellerProfiles.find((item) => item.id === auction.sellerId); if (seller?.userId === user.id) throw new ApiError(403, 'SELLER_CANNOT_BID', 'Sellers cannot bid on their own auctions'); const highest = db.auctionBids.filter((item) => item.auctionId === id).reduce((max, item) => Math.max(max, item.amount), auction.currentBid || auction.startingPrice); const minimum = highest + (auction.bidIncrement || 1); if (amount < minimum) throw new ApiError(409, 'BID_TOO_LOW', `Bid must be at least ${minimum}`); const bid = { id: store.id('bid'), auctionId: id, userId: user.id, amount, createdAt: new Date().toISOString() }; db.auctionBids.push(bid); auction.currentBid = amount; auction.bidCount = (auction.bidCount || 0) + 1; auction.updatedAt = bid.createdAt }); return this.get(id, user) },
+    async placeBid(id, body, user, headerIdempotencyKey = null) {
+      const amount = Number(body.amount)
+      if (!Number.isSafeInteger(amount) || amount < 1) throw new ApiError(400, 'VALIDATION_ERROR', 'amount must be a positive whole number')
+      const idempotencyKey = text(headerIdempotencyKey || body.idempotencyKey, 'idempotencyKey', { max: 160, required: false }) || null
+      const result = await store.mutate((db) => {
+        if (idempotencyKey) {
+          const existing = db.auctionBids.find((item) => item.auctionId === id && item.userId === user.id && item.idempotencyKey === idempotencyKey)
+          if (existing) return { bid: existing, created: false }
+        }
+        const auction = db.auctions.find((item) => item.id === id)
+        if (!auction) throw new ApiError(404, 'AUCTION_NOT_FOUND', 'Auction not found')
+        const status = auctionStatus(auction)
+        if (status === 'upcoming') throw new ApiError(409, 'AUCTION_NOT_STARTED', 'This auction has not started')
+        if (status !== 'live') throw new ApiError(409, 'AUCTION_CLOSED', 'This auction is closed')
+        const seller = db.sellerProfiles.find((item) => item.id === auction.sellerId)
+        if (seller?.userId === user.id) throw new ApiError(403, 'SELLER_CANNOT_BID', 'Sellers cannot bid on their own auctions')
+        const highest = db.auctionBids.filter((item) => item.auctionId === id).reduce((max, item) => Math.max(max, item.amount), auction.currentBid || auction.startingPrice)
+        const minimum = highest + (auction.bidIncrement || 1)
+        if (amount < minimum) throw new ApiError(409, 'BID_TOO_LOW', `Bid must be at least ${minimum}`)
+        const bid = { id: store.id('bid'), auctionId: id, userId: user.id, idempotencyKey, amount, createdAt: new Date().toISOString() }
+        db.auctionBids.push(bid)
+        auction.currentBid = amount
+        auction.bidCount = (auction.bidCount || 0) + 1
+        auction.updatedAt = bid.createdAt
+        return { bid, created: true }
+      })
+      return { ...result, auction: await this.get(id, user) }
+    },
     async watchlist(user) { return (await auctionRows(user)).filter((item) => item.watched) },
     async watch(body, user) { const auctionId = text(body.auctionId, 'auctionId', { max: 160 }); await this.get(auctionId, user); return store.mutate((db) => { if (db.auctionWatchlists.some((item) => item.userId === user.id && item.auctionId === auctionId)) throw new ApiError(409, 'AUCTION_ALREADY_WATCHED', 'Auction is already in your watchlist'); const item = { id: store.id('auction-watch'), userId: user.id, auctionId, createdAt: new Date().toISOString() }; db.auctionWatchlists.push(item); return item }) },
     async unwatch(id, user) { return store.mutate((db) => { const index = db.auctionWatchlists.findIndex((item) => item.userId === user.id && (item.id === id || item.auctionId === id)); if (index < 0) throw new ApiError(404, 'WATCHLIST_ITEM_NOT_FOUND', 'Auction watchlist item not found'); return db.auctionWatchlists.splice(index, 1)[0] }) },

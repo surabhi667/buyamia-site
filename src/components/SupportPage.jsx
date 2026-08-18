@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const emptyTicket = { title: '', description: '', categoryId: '', priority: 'normal' }
 function requestAuth() { window.dispatchEvent(new CustomEvent('buyamia:auth-required', { detail: { mode: 'login' } })) }
@@ -11,6 +11,7 @@ export default function SupportPage() {
   const [status, setStatus] = useState('loading')
   const [message, setMessage] = useState('')
   const [faqQuery, setFaqQuery] = useState('')
+  const ticketKey = useRef('')
 
   async function load() {
     const [categoryResponse, faqResponse, ticketResponse] = await Promise.all(['/api/support/categories', '/api/support/faqs?limit=6', '/api/support/tickets?limit=5'].map((url) => fetch(url, { credentials: 'include' })))
@@ -46,11 +47,13 @@ export default function SupportPage() {
     setStatus('saving')
     setMessage('')
     try {
-      const response = await fetch('/api/support/tickets', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ticket) })
+      ticketKey.current ||= crypto.randomUUID()
+      const response = await fetch('/api/support/tickets', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': ticketKey.current }, body: JSON.stringify(ticket) })
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error?.message || 'Unable to submit your request.')
       setTickets((current) => [payload.data, ...current])
       setTicket(emptyTicket)
+      ticketKey.current = ''
       setMessage('Your support request has been submitted.')
       setStatus('ready')
     } catch (error) { if (error.message.includes('Sign in') || error.message.includes('Authentication')) requestAuth(); setMessage(error.message || 'Unable to submit your request.'); setStatus('ready') }

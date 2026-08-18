@@ -133,6 +133,8 @@ function ChatInput({ value, onChange, onSend }) {
   )
 }
 
+function requestAuth() { window.dispatchEvent(new CustomEvent('buyamia:auth-required', { detail: { mode: 'login' } })) }
+
 export default function ChatWindow() {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState(initialMessages)
@@ -157,6 +159,7 @@ export default function ChatWindow() {
     try {
       const response = await fetch('/api/ask-amia/chat', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: cleanText, conversationId }) })
       const payload = await response.json()
+      if (response.status === 401) requestAuth()
       if (!response.ok) throw new Error(payload.error?.message || 'Amia is unavailable right now.')
       setConversationId(payload.data.conversationId)
       const assistant = {

@@ -124,7 +124,7 @@ test('order creation persists an authenticated user order and clears the cart', 
   const cart = await request('/api/cart', { cookie })
   assert.equal(cart.payload.data.items.length, 0)
   const state = await store.getState()
-  assert.equal(state.orders.length, 2)
+  assert.equal(state.orders.length, 1)
   const welcome = state.welcomeDiscounts.find((item) => item.userId === user.id)
   assert.equal(welcome.status, 'used')
   assert.equal(welcome.orderId, payload.data.id)

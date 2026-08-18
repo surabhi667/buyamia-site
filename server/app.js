@@ -23,10 +23,21 @@ async function readJson(request) {
     if (size > bodyLimit) throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'Request body is too large')
     chunks.push(chunk)
   }
+  let parsed
   try {
-    return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}
+    parsed = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}
   } catch {
     throw new ApiError(400, 'INVALID_JSON', 'Request body contains invalid JSON')
+  }
+  rejectDangerousJsonKeys(parsed)
+  return parsed
+}
+
+function rejectDangerousJsonKeys(value) {
+  if (!value || typeof value !== 'object') return
+  for (const [key, entry] of Object.entries(value)) {
+    if (['__proto__', 'constructor', 'prototype'].includes(key)) throw new ApiError(400, 'INVALID_JSON_PROPERTY', `${key} is not allowed`)
+    rejectDangerousJsonKeys(entry)
   }
 }
 
@@ -72,23 +83,22 @@ async function userForRequest(request, services) {
   const token = cookieValue(request, sessionCookieName)
   if (token) {
     try {
-      return (await services.auth.session(token)).user
+      const session = await services.auth.session(token)
+      return { ...session.user, sessionId: session.session.id }
     } catch {
-      // Public endpoints keep the demo-user fallback until the private routes are migrated.
+      // Public endpoints continue as anonymous guests when a stale cookie is present.
     }
   }
-  return userFrom(request)
+  return guestUser()
 }
 
 async function requireSessionUser(request, services) {
-  return (await services.auth.session(cookieValue(request, sessionCookieName))).user
+  const session = await services.auth.session(cookieValue(request, sessionCookieName))
+  return { ...session.user, sessionId: session.session.id }
 }
 
-function userFrom(request) {
-  const authenticated = Boolean(request.headers['x-user-id'] || request.headers['x-session-id'])
-  const id = String(request.headers['x-user-id'] || request.headers['x-session-id'] || 'demo-user').slice(0, 120)
-  const name = String(request.headers['x-user-name'] || 'Buyamia Guest').slice(0, 80)
-  return { id, name, avatar: '/assets/avatar-1.png', authenticated }
+function guestUser() {
+  return { id: null, name: 'Buyamia Guest', avatar: '/assets/avatar-1.png', authenticated: false }
 }
 
 function match(pathname, pattern) {
@@ -112,12 +122,13 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
 
     try {
       if (request.method === 'OPTIONS') {
-        response.writeHead(204, { ...corsHeaders, 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-User-Id, X-User-Name, X-Session-Id' })
+        response.writeHead(204, { ...corsHeaders, 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Idempotency-Key' })
         return response.end()
       }
 
       const url = new URL(request.url, 'http://localhost')
       const { pathname, searchParams } = url
+      if (pathname.startsWith('/api/') && !['GET', 'HEAD'].includes(request.method) && origin && !isAllowedOrigin(origin, allowedOrigin)) throw new ApiError(403, 'ORIGIN_NOT_ALLOWED', 'Origin is not allowed')
       let user = await userForRequest(request, services)
       let params
 
@@ -131,10 +142,11 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
       const privatePoolPath = pathname === '/api/buying-pools' && request.method === 'POST' || /^\/api\/buying-pools\/[^/]+\/join$/.test(pathname)
       const privateAffiliatePath = pathname === '/api/affiliate-program/application' || pathname === '/api/affiliate-program/applications'
       const privateCommunityPath = pathname === '/api/community/messages' && request.method === 'POST'
+      const privateChatPath = pathname.startsWith('/api/chat/') || pathname === '/api/ask-amia' || pathname.startsWith('/api/ask-amia/')
       const privateOrderAuxPath = /^\/api\/orders\/[^/]+\/(tracking|invoice)$/.test(pathname)
       const privateSellerFollowPath = /^\/api\/sellers\/[^/]+\/follow$/.test(pathname)
       const privateConciergePath = pathname === '/api/concierge/telegram/start' || pathname === '/api/concierge/telegram/connect' || pathname === '/api/concierge/telegram/disconnect' || pathname === '/api/concierge/telegram/history'
-      if (privateAccountPath || privateCartPath || privateCatalogPath || privateFlashSalePath || privateAuctionPath || privateSupportPath || privateSellerPath || privatePoolPath || privateAffiliatePath || privateCommunityPath || privateOrderAuxPath || privateSellerFollowPath || privateConciergePath) user = await requireSessionUser(request, services)
+      if (privateAccountPath || privateCartPath || privateCatalogPath || privateFlashSalePath || privateAuctionPath || privateSupportPath || privateSellerPath || privatePoolPath || privateAffiliatePath || privateCommunityPath || privateChatPath || privateOrderAuxPath || privateSellerFollowPath || privateConciergePath) user = await requireSessionUser(request, services)
 
       if (request.method === 'GET' && pathname === '/.well-known/buyamia-node') return json(response, 200, await services.nodeManifest.get(searchParams.get('supplier')), { ...corsHeaders, 'Cache-Control': 'public, max-age=3600' })
       if (request.method === 'GET' && pathname === '/api/health') return json(response, 200, { status: 'ok', service: 'buyamia-api', timestamp: new Date().toISOString() }, corsHeaders)
@@ -164,7 +176,6 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
         return json(response, 200, { data: authResponse(result) }, { ...corsHeaders, 'Set-Cookie': sessionCookie(request, result.sessionToken, result.sessionExpiresAt) })
       }
       if (request.method === 'POST' && pathname === '/api/auth/logout') {
-        if (origin && !isAllowedOrigin(origin, allowedOrigin)) throw new ApiError(403, 'ORIGIN_NOT_ALLOWED', 'Origin is not allowed')
         return logoutResponse(request, response, services, corsHeaders)
       }
       if (request.method === 'GET' && pathname === '/api/auth/session') return json(response, 200, { data: await services.auth.session(cookieValue(request, sessionCookieName)) }, corsHeaders)
@@ -185,8 +196,8 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
       if ((params = match(pathname, /^\/api\/categories\/([^/]+)\/products$/)) && request.method === 'GET') return json(response, 200, await services.categories.browseProducts(params[0], searchParams), corsHeaders)
       if ((params = match(pathname, /^\/api\/categories\/([^/]+)$/))) {
         if (request.method === 'GET') return json(response, 200, { data: await services.categories.detail(params[0]) }, corsHeaders)
-        if (request.method === 'PATCH' || request.method === 'PUT') return json(response, 200, { data: await services.categories.update(params[0], await readJson(request)) }, corsHeaders)
-        if (request.method === 'DELETE') return json(response, 200, { data: await services.categories.remove(params[0]) }, corsHeaders)
+        if (request.method === 'PATCH' || request.method === 'PUT') return json(response, 200, { data: await services.categories.update(params[0], await readJson(request), user) }, corsHeaders)
+        if (request.method === 'DELETE') return json(response, 200, { data: await services.categories.remove(params[0], user) }, corsHeaders)
       }
 
       if (request.method === 'GET' && pathname === '/api/products') return json(response, 200, await services.marketplace.products(searchParams), corsHeaders)
@@ -246,7 +257,11 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
       if ((params = match(pathname, /^\/api\/auctions\/watchlist\/([^/]+)$/)) && request.method === 'DELETE') { if (!user.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to manage your auction watchlist'); return json(response, 200, { data: await services.auctions.unwatch(params[0], user) }, corsHeaders) }
       if ((params = match(pathname, /^\/api\/auctions\/([^/]+)\/bids$/))) {
         if (request.method === 'GET') return json(response, 200, await services.auctions.bids(params[0], searchParams, user), corsHeaders)
-        if (request.method === 'POST') { if (!user.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to place a bid'); return json(response, 201, { data: await services.auctions.placeBid(params[0], await readJson(request), user) }, corsHeaders) }
+        if (request.method === 'POST') {
+          if (!user.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to place a bid')
+          const result = await services.auctions.placeBid(params[0], await readJson(request), user, request.headers['idempotency-key'])
+          return json(response, result.created ? 201 : 200, { data: result.auction, bid: result.bid }, corsHeaders)
+        }
       }
       if ((params = match(pathname, /^\/api\/auctions\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.auctions.get(params[0], user) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/auction-listings') return json(response, 200, await services.auctionListings.list(searchParams, user), corsHeaders)
@@ -285,7 +300,10 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
       if (request.method === 'GET' && pathname === '/api/support/categories') return json(response, 200, await services.support.categories(), corsHeaders)
       if (request.method === 'GET' && pathname === '/api/support/faqs') return json(response, 200, await services.support.faqs(searchParams), corsHeaders)
       if (request.method === 'GET' && pathname === '/api/support/tickets') return json(response, 200, await services.support.tickets(searchParams, user), corsHeaders)
-      if (request.method === 'POST' && (pathname === '/api/support' || pathname === '/api/support/tickets')) return json(response, 201, { data: await services.support.createTicket(await readJson(request), user) }, corsHeaders)
+      if (request.method === 'POST' && (pathname === '/api/support' || pathname === '/api/support/tickets')) {
+        const result = await services.support.createTicket(await readJson(request), user, request.headers['idempotency-key'])
+        return json(response, result.created ? 201 : 200, { data: result.ticket }, corsHeaders)
+      }
       if ((params = match(pathname, /^\/api\/support\/tickets\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.support.ticket(params[0], user) }, corsHeaders)
 
       if (request.method === 'GET' && pathname === '/api/community/messages') return json(response, 200, await services.community.list(searchParams), corsHeaders)

@@ -4,7 +4,7 @@ const tabs = [['overview', 'Overview'], ['security', 'Security'], ['users', 'Use
 const supplierInitial = { companyName: '', contactName: '', email: '', phone: '', country: 'Indonesia', categoryId: '', website: '', verificationStatus: 'pending-review', reason: 'Manual supplier onboarding' }
 
 async function api(url, options) {
-  const response = await fetch(url, options)
+  const response = await fetch(url, { credentials: 'include', ...(options || {}) })
   const payload = await response.json()
   if (!response.ok) throw new Error(payload.error?.message || 'The administrative request could not be completed.')
   return payload

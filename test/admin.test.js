@@ -105,11 +105,14 @@ test('administrator approval converts a submitted seller application into a supp
 test('refund workflow never claims provider execution and enforces eligible amount', async (t) => {
   const { request, store } = await withApi(t)
   const admin = await signup(request, 'refund-admin@example.com'); await makeAdmin(store, admin.userId)
-  const created = await request('/api/admin/refunds', { method: 'POST', cookie: admin.cookie, body: { orderId: 'order-demo-1001', amount: 500000, reason: 'Customer order issue confirmed', confirmed: true } })
+  await store.mutate((db) => {
+    db.orders.push({ id: 'order-refundable-1001', userId: 'refund-buyer', orderNumber: 'BYA-REFUND-1001', status: 'delivered', total: 1000000, subtotal: 900000, taxes: 0, shippingCost: 100000, currency: 'IDR', payment: { method: 'External provider', status: 'paid' }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), items: [] })
+  })
+  const created = await request('/api/admin/refunds', { method: 'POST', cookie: admin.cookie, body: { orderId: 'order-refundable-1001', amount: 500000, reason: 'Customer order issue confirmed', confirmed: true } })
   assert.equal(created.response.status, 201)
   assert.equal(created.payload.data.status, 'payment_provider_not_configured')
   assert.equal(created.payload.data.providerExecuted, false)
-  const excessive = await request('/api/admin/refunds', { method: 'POST', cookie: admin.cookie, body: { orderId: 'order-demo-1001', amount: 1000001, reason: 'Attempt beyond remaining amount', confirmed: true } })
+  const excessive = await request('/api/admin/refunds', { method: 'POST', cookie: admin.cookie, body: { orderId: 'order-refundable-1001', amount: 1000001, reason: 'Attempt beyond remaining amount', confirmed: true } })
   assert.equal(excessive.response.status, 409)
   assert.equal(excessive.payload.error.code, 'REFUND_AMOUNT_EXCEEDED')
   assert.equal((await store.read('adminAuditLogs')).at(-1).action, 'refund.request')

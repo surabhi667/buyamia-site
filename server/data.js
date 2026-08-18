@@ -104,7 +104,7 @@ export const seedData = {
   sellerDocuments: [],
   sellerFollows: [],
   sellerProfiles: [
-    { id: 'seller-sari', userId: 'seller-demo-user', brandId: 'brand-sari-living', companyName: 'Sari Living', displayName: 'Sari Living', email: 'hello@sariliving.example', phone: '+62 361 555 0100', country: 'Indonesia', location: 'Bali, Indonesia', categories: ['furniture', 'home-decoration'], bio: 'Handcrafted furniture for hospitality and commercial spaces, made by Indonesian artisans with thoughtful materials and lasting techniques.', established: 2015, instagram: '@sariliving', impactTags: ['Heritage Craft', 'Eco Materials', 'Sustainable Design', 'Innovation', 'Women Led'], verificationStatus: 'approved', public: true, createdAt: now, updatedAt: now },
+    { id: 'seller-sari', userId: 'seed-seller-sari', brandId: 'brand-sari-living', companyName: 'Sari Living', displayName: 'Sari Living', email: 'hello@sariliving.example', phone: '+62 361 555 0100', country: 'Indonesia', location: 'Bali, Indonesia', categories: ['furniture', 'home-decoration'], bio: 'Handcrafted furniture for hospitality and commercial spaces, made by Indonesian artisans with thoughtful materials and lasting techniques.', established: 2015, instagram: '@sariliving', impactTags: ['Heritage Craft', 'Eco Materials', 'Sustainable Design', 'Innovation', 'Women Led'], verificationStatus: 'approved', public: true, createdAt: now, updatedAt: now },
   ],
   auctions: [
     { id: 'auction-chair-1', productId: 'prod-accent-chair', sellerId: 'seller-sari', title: 'Modern Artisan Accent Chair', description: 'A sculptural hand-finished chair from an Indonesian furniture studio.', images: ['/assets/featured-3.png'], categoryId: 'furniture', startingPrice: 800000, currentBid: 1000000, reservePrice: 950000, bidIncrement: 50000, bidCount: 3, featured: true, startTime: '2026-01-01T00:00:00.000Z', endTime: '2027-09-15T12:00:00.000Z', status: 'live', createdAt: now },
@@ -152,16 +152,10 @@ export const seedData = {
   accountSecurity: [],
   shippingAddresses: [],
   bankAccounts: [],
-  orders: [
-    { id: 'order-demo-1001', userId: 'demo-user', orderNumber: 'BYA-1001', status: 'Shipped', trackingNumber: 'BYA-TRACK-1001', total: 1500000, subtotal: 1400000, taxes: 0, shippingCost: 100000, currency: 'IDR', invoiceReference: 'INV-BYA-1001', deliveryEstimate: '2026-08-18', seller: { name: 'Sari Living', id: 'seller-sari' }, shipping: { carrier: 'Buyamia Logistics', service: 'International Standard', destination: 'Bali, Indonesia' }, timeline: [{ status: 'Confirmed', at: now }, { status: 'Processing', at: now }, { status: 'Shipped', at: now }], payment: { method: 'Bank transfer', status: 'paid' }, createdAt: now, updatedAt: now, items: [{ productId: 'prod-bamboo-table', quantity: 1, unitPrice: 1400000 }] },
-  ],
+  orders: [],
   wishlists: [],
   savedCollections: [],
-  cartItems: [
-    { id: 'cart-demo-1', userId: 'demo-user', productId: 'prod-bamboo-table', quantity: 1, packSize: 15, unitPrice: 1000000, shippingMethod: 'air', customization: 'Yes', warranty: 'No', createdAt: now },
-    { id: 'cart-demo-2', userId: 'demo-user', productId: 'prod-bamboo-table', quantity: 1, packSize: 15, unitPrice: 1000000, shippingMethod: 'air', customization: 'Yes', warranty: 'No', createdAt: now },
-    { id: 'cart-demo-3', userId: 'demo-user', productId: 'prod-bamboo-table', quantity: 1, packSize: 15, unitPrice: 1000000, shippingMethod: 'sea', customization: 'Yes · Custom size', warranty: 'No', createdAt: now },
-  ],
+  cartItems: [],
   savedCartItems: [],
   cartCoupons: [],
   welcomeDiscounts: [],
