@@ -123,6 +123,23 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
 
       if (request.method === 'GET' && pathname === '/.well-known/buyamia-node') return json(response, 200, await services.nodeManifest.get(searchParams.get('supplier')), { ...corsHeaders, 'Cache-Control': 'public, max-age=3600' })
       if (request.method === 'GET' && pathname === '/api/health') return json(response, 200, { status: 'ok', service: 'buyamia-api', timestamp: new Date().toISOString() }, corsHeaders)
+      if (pathname.startsWith('/api/admin/')) {
+        if (request.method !== 'GET' && origin && !isAllowedOrigin(origin, allowedOrigin)) throw new ApiError(403, 'ORIGIN_NOT_ALLOWED', 'Origin is not allowed')
+        const adminUser = await requireSessionUser(request, services)
+        if (request.method === 'GET' && pathname === '/api/admin/dashboard') return json(response, 200, { data: await services.admin.dashboard(adminUser) }, corsHeaders)
+        if (request.method === 'GET' && pathname === '/api/admin/security') return json(response, 200, { data: await services.admin.security(adminUser) }, corsHeaders)
+        if (request.method === 'GET' && pathname === '/api/admin/users') return json(response, 200, await services.admin.users(searchParams, adminUser), corsHeaders)
+        if ((params = match(pathname, /^\/api\/admin\/users\/([^/]+)$/)) && request.method === 'PATCH') return json(response, 200, { data: await services.admin.updateUser(params[0], await readJson(request), adminUser) }, corsHeaders)
+        if (request.method === 'GET' && pathname === '/api/admin/suppliers') return json(response, 200, await services.admin.suppliers(searchParams, adminUser), corsHeaders)
+        if (request.method === 'POST' && pathname === '/api/admin/suppliers') return json(response, 201, { data: await services.admin.addSupplier(await readJson(request), adminUser) }, corsHeaders)
+        if ((params = match(pathname, /^\/api\/admin\/suppliers\/([^/]+)$/)) && request.method === 'PATCH') return json(response, 200, { data: await services.admin.updateSupplier(params[0], await readJson(request), adminUser) }, corsHeaders)
+        if (request.method === 'GET' && pathname === '/api/admin/refunds') return json(response, 200, { data: await services.admin.refunds(searchParams, adminUser) }, corsHeaders)
+        if (request.method === 'POST' && pathname === '/api/admin/refunds') return json(response, 201, { data: await services.admin.createRefund(await readJson(request), adminUser) }, corsHeaders)
+        if (request.method === 'GET' && pathname === '/api/admin/amia') return json(response, 200, { data: await services.admin.amia(adminUser) }, corsHeaders)
+        if (request.method === 'PATCH' && pathname === '/api/admin/amia') return json(response, 200, { data: await services.admin.updateAmia(await readJson(request), adminUser) }, corsHeaders)
+        if (request.method === 'GET' && pathname === '/api/admin/audit-log') return json(response, 200, await services.admin.auditLog(searchParams, adminUser), corsHeaders)
+        throw new ApiError(404, 'NOT_FOUND', 'Admin API endpoint not found')
+      }
       if (request.method === 'POST' && pathname === '/api/auth/signup') {
         const result = await services.auth.signup(await readJson(request), authRequestMeta(request))
         return json(response, 201, { data: authResponse(result) }, { ...corsHeaders, 'Set-Cookie': sessionCookie(request, result.sessionToken, result.sessionExpiresAt) })

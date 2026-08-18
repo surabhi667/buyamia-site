@@ -14,6 +14,7 @@ import AffiliatePage from './components/AffiliatePage'
 import CategoriesPage from './components/CategoriesPage'
 import BrandsPage from './components/BrandsPage'
 import CreateBrandPage from './components/CreateBrandPage'
+import AdminPage from './components/AdminPage'
 import SourcePage from './components/SourcePage'
 import CartPage from './components/CartPage'
 import AskAmiaPage from './components/AskAmiaPage'
@@ -152,6 +153,7 @@ export default function App() {
   const caravanUrl = import.meta.env.VITE_CARAVAN_URL || 'http://localhost:5176/'
   const [leftOpen, setLeftOpen] = useState(false)
   const [rightOpen, setRightOpen] = useState(false)
+  if (window.location.pathname === '/admin') return <AdminPage />
   const isAccountPage = window.location.pathname === '/account'
   const isSupportPage = window.location.pathname === '/support'
   const isShippingAddressesPage = window.location.pathname === '/account/shipping-addresses'

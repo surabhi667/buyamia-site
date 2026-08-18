@@ -1,6 +1,7 @@
 import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { buildNodeManifest } from './node-manifest.js'
+import { createAdminService } from './admin.js'
 
 const scryptAsync = promisify(scrypt)
 
@@ -135,6 +136,7 @@ function relevance(query, fields) {
 }
 
 export function createServices(store, environment = process.env) {
+  const administratorEmails = new Set(String(environment.BUYAMIA_ADMIN_EMAILS || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean))
   function newAuthSession(timestamp, requestMeta = {}) {
     const token = randomBytes(32).toString('base64url')
     const expiresAt = new Date(Date.now() + authSessionTtlMs).toISOString()
@@ -189,7 +191,7 @@ export function createServices(store, environment = process.env) {
         const firstName = explicitFirstName || derivedFirstName
         const lastName = explicitLastName || derivedLastName.join(' ') || 'User'
         const username = `user-${userId.replace(/^user_/, '').slice(0, 12)}`
-        const account = { userId, firstName, lastName, username, email, normalizedEmail: email, phone: '', company: '', country: 'Indonesia (ID)', language: 'en', currency: 'IDR', avatar: '/assets/avatar-1.png', createdAt: timestamp, updatedAt: timestamp }
+        const account = { userId, firstName, lastName, username, email, normalizedEmail: email, phone: '', company: '', country: 'Indonesia (ID)', language: 'en', currency: 'IDR', avatar: '/assets/avatar-1.png', role: administratorEmails.has(email) ? 'administrator' : 'user', status: 'active', createdAt: timestamp, updatedAt: timestamp }
         const { token, session } = newAuthSession(timestamp, requestMeta)
         db.accounts.push(account)
         db.accountSecurity.push(authSecurity(userId, timestamp, passwordHashValue, session))
@@ -203,7 +205,14 @@ export function createServices(store, environment = process.env) {
       const account = accountByEmail(accounts, email)
       const security = account ? (await store.read('accountSecurity')).find((item) => item.userId === account.userId) : null
       const matches = await passwordMatches(password, security?.passwordHash || dummyPasswordHash)
-      if (!account || !security?.passwordHash || !matches) throw invalidCredentials()
+      if (!account || !security?.passwordHash || !matches) {
+        await store.mutate((db) => { db.securityEvents.push({ id: store.id('security'), type: 'failed_login', severity: 'medium', identifier: `${email.slice(0, 3)}***@${email.split('@')[1]}`, createdAt: new Date().toISOString() }) })
+        throw invalidCredentials()
+      }
+      if (account.status === 'suspended') {
+        await store.mutate((db) => { db.securityEvents.push({ id: store.id('security'), type: 'suspended_account_login', severity: 'high', userId: account.userId, createdAt: new Date().toISOString() }) })
+        throw new ApiError(403, 'ACCOUNT_SUSPENDED', 'This account is suspended')
+      }
       return store.mutate((db) => {
         const currentAccount = db.accounts.find((item) => item.userId === account.userId)
         const currentSecurity = db.accountSecurity.find((item) => item.userId === account.userId)
@@ -235,6 +244,7 @@ export function createServices(store, environment = process.env) {
         const currentSession = currentSecurity?.activeSessions?.find((item) => item.id === session.id)
         const account = db.accounts.find((item) => item.userId === security.userId)
         if (!currentSecurity || !currentSession || !account) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Authentication required')
+        if (account.status === 'suspended') { currentSecurity.activeSessions = []; throw new ApiError(403, 'ACCOUNT_SUSPENDED', 'This account is suspended') }
         currentSession.lastUsedAt = timestamp
         currentSecurity.updatedAt = timestamp
         return { user: publicUser(account), session: publicSession(currentSession) }
@@ -1422,5 +1432,7 @@ export function createServices(store, environment = process.env) {
     },
   }
 
-  return { auth, about, categories, products, marketplace, buyingPools, flashSales, fastSelling, sellerPromotions, brands, source, search, community, chat, account, affiliate, support, cart, checkout, orders, seller, auctions, auctionListings, concierge, promoFeedback, nodeManifest }
+  const admin = createAdminService(store, environment, { ApiError, text, paginate })
+
+  return { auth, about, categories, products, marketplace, buyingPools, flashSales, fastSelling, sellerPromotions, brands, source, search, community, chat, account, affiliate, support, cart, checkout, orders, seller, auctions, auctionListings, concierge, promoFeedback, nodeManifest, admin }
 }

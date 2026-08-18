@@ -161,6 +161,10 @@ export const seedData = {
   affiliateCommissions: [],
   affiliatePayouts: [],
   affiliateReferrals: [],
+  adminAuditLogs: [],
+  adminRefunds: [],
+  securityEvents: [],
+  adminSettings: { amia: { enabled: true, moderation: 'standard', capabilities: ['products', 'suppliers', 'services', 'categories', 'auctions', 'flash-sales'], updatedAt: now, updatedBy: null } },
 }
 
 export function createStore(filePath) {
