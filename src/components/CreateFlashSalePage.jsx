@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 
-const supplierHeaders = { 'Content-Type': 'application/json', 'X-User-Id': 'seller-demo-user', 'X-User-Name': 'Sari Living' }
+const supplierHeaders = { 'Content-Type': 'application/json' }
 const money = (value, currency = 'IDR') => new Intl.NumberFormat('id-ID', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 const blankForm = { title: '', productId: '', description: '', salePrice: '', remainingStock: '', startTime: '', endTime: '' }
 
 async function api(url, options) {
-  const response = await fetch(url, options)
+  const response = await fetch(url, { credentials: 'include', ...(options || {}) })
   const payload = await response.json()
   if (!response.ok) throw new Error(payload.error?.message || 'Unable to save this Flash Sale.')
   return payload

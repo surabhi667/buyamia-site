@@ -128,6 +128,11 @@ test('signup creates a user and a session', async (t) => {
   assert.equal(state.accounts[0].normalizedEmail, 'buyer@example.com')
   assert.notEqual(state.accountSecurity[0].passwordHash, validPassword)
   assert.equal(typeof state.accountSecurity[0].activeSessions[0].tokenHash, 'string')
+  assert.equal(state.welcomeDiscounts.length, 1)
+  assert.equal(state.welcomeDiscounts[0].userId, payload.data.user.userId)
+  assert.equal(state.welcomeDiscounts[0].type, 'welcome-first-order')
+  assert.equal(state.welcomeDiscounts[0].percent, 10)
+  assert.equal(state.welcomeDiscounts[0].status, 'eligible')
 })
 
 test('signup rejects an invalid email', async (t) => {
@@ -266,9 +271,9 @@ test('account sessions never include tokenHash or token data', async (t) => {
     method: 'POST',
     body: { email: 'buyer@example.com', password: validPassword, name: 'Buyer One' },
   })
-  const userId = signup.payload.data.user.userId
+  const cookie = sessionCookie(signup.response)
   const { response, payload } = await request('/api/account/sessions', {
-    headers: { 'X-User-Id': userId, 'X-User-Name': 'Buyer One' },
+    cookie,
   })
 
   assert.equal(response.status, 200)
@@ -283,10 +288,11 @@ test('profile email updates normalize normalizedEmail and move login to the new 
     method: 'POST',
     body: { email: 'old@example.com', password: validPassword, name: 'Buyer One' },
   })
+  const cookie = sessionCookie(signup.response)
   const userId = signup.payload.data.user.userId
   const update = await request('/api/account', {
     method: 'PATCH',
-    headers: { 'X-User-Id': userId, 'X-User-Name': 'Buyer One' },
+    cookie,
     body: { email: 'NewEmail@Example.COM', phone: '+62123456789' },
   })
 
@@ -320,9 +326,10 @@ test('profile email update rejects an email already used with different casing',
     method: 'POST',
     body: { email: 'Taken@Example.com', password: validPassword, name: 'Taken User' },
   })
+  const cookie = sessionCookie(first.response)
   const response = await request('/api/account', {
     method: 'PATCH',
-    headers: { 'X-User-Id': first.payload.data.user.userId, 'X-User-Name': 'First User' },
+    cookie,
     body: { email: 'taken@example.COM', phone: '+62123456789' },
   })
 

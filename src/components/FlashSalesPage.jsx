@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import CreateFlashSalePage from './CreateFlashSalePage'
+import AccountFooter from './AccountFooter'
 
 const money = (value, currency = 'IDR') => new Intl.NumberFormat('id-ID', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 const api = async (url) => { const response = await fetch(url); const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message || 'Unable to load flash sales.'); return payload }
@@ -17,7 +18,7 @@ function ProductCard({ product, saleId }) {
 }
 
 function FlashFooter() {
-  return <footer className="account-footer flash-footer shell"><div className="logo">buyamia</div><p>Buy some comfort. Buy<br />some care.</p><div><small>SHOP</small><span>All Products</span><span>Furniture</span><span>Home Decor</span></div><div><small>ABOUT US</small><span>About Us</span><span>Sustainability</span><span>Sell on Buyamia</span></div><div><small>SUPPORT</small><span>Help Center</span><span>Contact Us</span><span>FAQ</span></div></footer>
+  return <AccountFooter className="flash-footer shell" />
 }
 
 function FlashSaleDetail({ id }) {

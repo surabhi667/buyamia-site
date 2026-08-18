@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 const emptyTicket = { title: '', description: '', categoryId: '', priority: 'normal' }
+function requestAuth() { window.dispatchEvent(new CustomEvent('buyamia:auth-required', { detail: { mode: 'login' } })) }
 
 export default function SupportPage() {
   const [categories, setCategories] = useState([])
@@ -12,23 +13,28 @@ export default function SupportPage() {
   const [faqQuery, setFaqQuery] = useState('')
 
   async function load() {
-    const responses = await Promise.all(['/api/support/categories', '/api/support/faqs?limit=6', '/api/support/tickets?limit=5'].map((url) => fetch(url)))
-    const payloads = await Promise.all(responses.map((response) => response.json()))
-    if (responses.some((response) => !response.ok)) throw new Error(payloads.find((item) => item.error)?.error?.message || 'Unable to load support.')
-    setCategories(payloads[0].data)
-    setFaqs(payloads[1].data)
-    setTickets(payloads[2].data)
+    const [categoryResponse, faqResponse, ticketResponse] = await Promise.all(['/api/support/categories', '/api/support/faqs?limit=6', '/api/support/tickets?limit=5'].map((url) => fetch(url, { credentials: 'include' })))
+    const [categoryPayload, faqPayload, ticketPayload] = await Promise.all([categoryResponse, faqResponse, ticketResponse].map((response) => response.json()))
+    if (!categoryResponse.ok || !faqResponse.ok) throw new Error(categoryPayload.error?.message || faqPayload.error?.message || 'Unable to load support.')
+    setCategories(categoryPayload.data)
+    setFaqs(faqPayload.data)
+    setTickets(ticketResponse.ok ? ticketPayload.data : [])
   }
 
   useEffect(() => {
     load().then(() => setStatus('ready')).catch((error) => { setMessage(error.message); setStatus('error') })
   }, [])
 
+  useEffect(() => {
+    if (status !== 'ready' || !window.location.hash) return
+    document.getElementById(window.location.hash.slice(1))?.scrollIntoView()
+  }, [status])
+
   async function searchFaqs(event) {
     const value = event.target.value
     setFaqQuery(value)
     try {
-      const response = await fetch(`/api/support/faqs?limit=6&q=${encodeURIComponent(value)}`)
+      const response = await fetch(`/api/support/faqs?limit=6&q=${encodeURIComponent(value)}`, { credentials: 'include' })
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error?.message)
       setFaqs(payload.data)
@@ -40,14 +46,14 @@ export default function SupportPage() {
     setStatus('saving')
     setMessage('')
     try {
-      const response = await fetch('/api/support/tickets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ticket) })
+      const response = await fetch('/api/support/tickets', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ticket) })
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error?.message || 'Unable to submit your request.')
       setTickets((current) => [payload.data, ...current])
       setTicket(emptyTicket)
       setMessage('Your support request has been submitted.')
       setStatus('ready')
-    } catch (error) { setMessage(error.message || 'Unable to submit your request.'); setStatus('ready') }
+    } catch (error) { if (error.message.includes('Sign in') || error.message.includes('Authentication')) requestAuth(); setMessage(error.message || 'Unable to submit your request.'); setStatus('ready') }
   }
 
   return <main className="support-page shell">
@@ -64,6 +70,6 @@ export default function SupportPage() {
       </form>
       <aside className="support-tickets"><h2>Your requests</h2>{status === 'loading' && <p>Loading requests…</p>}{status !== 'loading' && tickets.length === 0 && <p>No support requests yet.</p>}{tickets.map((item) => <article key={item.id}><span><small>{item.status}</small><strong>{item.title}</strong></span><time>{new Date(item.updatedAt).toLocaleDateString()}</time></article>)}</aside>
     </section>
-    <section className="support-faq"><div><p className="eyebrow">Help Centre</p><h2>Frequently asked questions</h2></div><label className="support-faq-search"><span className="visually-hidden">Search FAQs</span><input value={faqQuery} onChange={searchFaqs} placeholder="Search help topics" /></label><div className="support-faq-list">{faqs.length ? faqs.map((faq) => <details key={faq.id}><summary>{faq.question}</summary><p>{faq.answer}</p></details>) : <p>No FAQ results found.</p>}</div></section>
+    <section className="support-faq" id="faq"><div><p className="eyebrow">Help Centre</p><h2>Frequently asked questions</h2></div><label className="support-faq-search"><span className="visually-hidden">Search FAQs</span><input value={faqQuery} onChange={searchFaqs} placeholder="Search help topics" /></label><div className="support-faq-list">{faqs.length ? faqs.map((faq) => <details key={faq.id}><summary>{faq.question}</summary><p>{faq.answer}</p></details>) : <p>No FAQ results found.</p>}</div></section>
   </main>
 }

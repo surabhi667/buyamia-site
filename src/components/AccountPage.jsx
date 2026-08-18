@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import AccountFooter from './AccountFooter'
 
 const initialProfile = { firstName: '', lastName: '', email: '', phone: '', country: 'Indonesia (ID)', avatar: '/assets/avatar-1.png' }
 
@@ -9,7 +10,7 @@ export default function AccountPage() {
 
   useEffect(() => {
     const controller = new AbortController()
-    fetch('/api/account', { signal: controller.signal })
+    fetch('/api/account', { credentials: 'include', signal: controller.signal })
       .then(async (response) => {
         const payload = await response.json()
         if (!response.ok) throw new Error(payload.error?.message || 'Unable to load your account.')
@@ -46,6 +47,7 @@ export default function AccountPage() {
     try {
       const response = await fetch('/api/account', {
         method: 'PUT',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profile),
       })
@@ -82,10 +84,10 @@ export default function AccountPage() {
         </section>
         <aside className="account-side">
           <div className="account-credit"><span>Credit usage</span><small>Try to up</small><b>750</b><i /></div>
-          {['Account', 'Security', 'Shipping Address', 'Bank Account', 'My Orders', 'Wishlist', 'Browsing History', 'Affiliate'].map((item) => <button type="button" key={item} onClick={item === 'Shipping Address' ? () => { window.location.href = '/account/shipping-addresses' } : item === 'Security' ? () => { window.location.href = '/account/security' } : item === 'Bank Account' ? () => { window.location.href = '/account/bank-accounts' } : item === 'My Orders' ? () => { window.location.href = '/account/orders' } : item === 'Wishlist' ? () => { window.location.href = '/account/wishlist' } : item === 'Browsing History' ? () => { window.location.href = '/account/history' } : item === 'Affiliate' ? () => { window.location.href = '/account/affiliate' } : undefined}>{item}<span>›</span></button>)}
+          {['Account', 'Security', 'Shipping Address', 'Bank Account', 'My Orders', 'Wishlist', 'Browsing History', 'Affiliate'].map((item) => <button type="button" key={item} onClick={item === 'Shipping Address' ? () => { window.location.href = '/account/shipping-addresses' } : item === 'Security' ? () => { window.location.href = '/account/security' } : item === 'Bank Account' ? () => { window.location.href = '/account/bank-accounts' } : item === 'My Orders' ? () => { window.location.href = '/account/orders' } : item === 'Wishlist' ? () => { window.location.href = '/account/wishlist' } : item === 'Browsing History' ? () => { window.location.href = '/account/history' } : item === 'Affiliate' ? () => { window.location.href = '/account/affiliate' } : () => { window.location.href = '/account' }}>{item}<span>›</span></button>)}
         </aside>
       </main>
-      <footer className="account-footer shell"><div className="logo">buyamia</div><p>Buy some comfort. Buy<br />some care.</p><div><small>SHOP</small><span>All Products</span><span>Furniture</span><span>Home Decor</span></div><div><small>ABOUT US</small><span>About Us</span><span>Sustainability</span><span>Sell on Buyamia</span></div><div><small>SUPPORT</small><span>Help Center</span><span>Contact Us</span><span>FAQ</span></div></footer>
+      <AccountFooter className="shell" />
     </>
   )
 }

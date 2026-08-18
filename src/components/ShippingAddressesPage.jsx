@@ -10,7 +10,7 @@ export default function ShippingAddressesPage() {
   const [message, setMessage] = useState('')
 
   async function load() {
-    const response = await fetch('/api/account/shipping-addresses?limit=50')
+    const response = await fetch('/api/account/shipping-addresses?limit=50', { credentials: 'include' })
     const payload = await response.json()
     if (!response.ok) throw new Error(payload.error?.message || 'Unable to load shipping addresses.')
     setAddresses(payload.data)
@@ -22,14 +22,14 @@ export default function ShippingAddressesPage() {
   async function save(event) {
     event.preventDefault(); setStatus('saving'); setMessage('')
     try {
-      const response = await fetch(editingId ? `/api/account/shipping-addresses/${editingId}` : '/api/account/shipping-addresses', { method: editingId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+      const response = await fetch(editingId ? `/api/account/shipping-addresses/${editingId}` : '/api/account/shipping-addresses', { method: editingId ? 'PUT' : 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
       const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message || 'Unable to save this address.')
       await load(); setForm(blankAddress); setEditingId(null); setMessage('Address saved.'); setStatus('ready')
     } catch (error) { setMessage(error.message); setStatus('ready') }
   }
 
   async function action(url, method = 'POST') {
-    const response = await fetch(url, { method }); const payload = await response.json()
+    const response = await fetch(url, { method, credentials: 'include' }); const payload = await response.json()
     if (!response.ok) { setMessage(payload.error?.message || 'Unable to update this address.'); return }
     await load()
   }

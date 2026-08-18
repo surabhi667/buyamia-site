@@ -9,14 +9,14 @@ export default function SecurityPage() {
   const [loading, setLoading] = useState(true)
 
   async function load() {
-    const responses = await Promise.all(['/api/account/security', '/api/account/sessions', '/api/account/login-history?limit=5'].map((url) => fetch(url)))
+    const responses = await Promise.all(['/api/account/security', '/api/account/sessions', '/api/account/login-history?limit=5'].map((url) => fetch(url, { credentials: 'include' })))
     const data = await Promise.all(responses.map((response) => response.json()))
     if (responses.some((response) => !response.ok)) throw new Error(data.find((item) => item.error)?.error?.message || 'Unable to load security settings.')
     setSecurity(data[0].data); setSessions(data[1].data); setHistory(data[2].data)
   }
 
   useEffect(() => { load().catch((error) => setMessage(error.message)).finally(() => setLoading(false)) }, [])
-  async function request(url, options) { const response = await fetch(url, options); const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message || 'Unable to update security settings.'); return payload.data }
+  async function request(url, options) { const response = await fetch(url, { credentials: 'include', ...(options || {}) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message || 'Unable to update security settings.'); return payload.data }
 
   async function changePassword(event) { event.preventDefault(); setMessage(''); try { const next = await request('/api/account/password', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(passwords) }); setSecurity(next); setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' }); setMessage('Password updated. Other sessions have been signed out.') } catch (error) { setMessage(error.message) } }
   async function toggleTwoFactor(event) { try { const next = await request('/api/account/security', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ twoFactorEnabled: event.target.checked }) }); setSecurity(next) } catch (error) { setMessage(error.message) } }

@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 
-const authHeaders = { 'Content-Type': 'application/json', 'X-User-Id': 'demo-user', 'X-User-Name': 'Buyamia Buyer' }
+const authHeaders = { 'Content-Type': 'application/json' }
 const initialForm = { productName: '', preferredSupplier: '', orderQuantity: '', frequency: 'weekly', minimumBusinesses: '10', maximumBusinesses: '20', targetVolume: '', location: 'Bali, Indonesia', matchingRadius: 'city', industryMatching: 'same-industry', poolWindowDays: '14', monitoring: '' }
+function requestAuth() { window.dispatchEvent(new CustomEvent('buyamia:auth-required', { detail: { mode: 'login' } })) }
 
 async function createPool(data, publish) {
-  const response = await fetch('/api/buying-pools', { method: 'POST', headers: authHeaders, body: JSON.stringify({ ...data, orderQuantity: Number(data.orderQuantity), minimumBusinesses: Number(data.minimumBusinesses), maximumBusinesses: data.maximumBusinesses ? Number(data.maximumBusinesses) : null, targetVolume: Number(data.targetVolume), poolWindowDays: Number(data.poolWindowDays), publish }) })
+  const response = await fetch('/api/buying-pools', { method: 'POST', credentials: 'include', headers: authHeaders, body: JSON.stringify({ ...data, orderQuantity: Number(data.orderQuantity), minimumBusinesses: Number(data.minimumBusinesses), maximumBusinesses: data.maximumBusinesses ? Number(data.maximumBusinesses) : null, targetVolume: Number(data.targetVolume), poolWindowDays: Number(data.poolWindowDays), publish }) })
   const payload = await response.json()
   if (!response.ok) throw new Error(payload.error?.message || 'Unable to save this Buying Pool.')
   return payload.data
@@ -18,7 +19,7 @@ export default function CreateBuyingPoolPage() {
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }))
   const visibleSteps = useMemo(() => step <= 3 ? [1, 2, 3] : step === 4 ? [2, 3, 4] : [4, 5], [step])
   const continueFrom = (event, next) => { event.preventDefault(); if (!event.currentTarget.reportValidity()) return; setStep(next) }
-  const save = async (publish) => { setBusy(true); setMessage(''); try { const pool = await createPool(form, publish); if (publish) setLaunched(pool); else { setMessage('Buying Pool saved as draft.'); setTimeout(() => window.location.assign('/buying-pools'), 700) } } catch (error) { setMessage(error.message) } finally { setBusy(false) } }
+  const save = async (publish) => { setBusy(true); setMessage(''); try { const pool = await createPool(form, publish); if (publish) setLaunched(pool); else { setMessage('Buying Pool saved as draft.'); setTimeout(() => window.location.assign('/buying-pools'), 700) } } catch (error) { if (error.message.includes('Sign in')) requestAuth(); setMessage(error.message) } finally { setBusy(false) } }
   const summary = <ul><li>Product / Category <strong>{form.productName || '[Entry]'}</strong></li><li>Quantity needed <strong>{form.orderQuantity || '[Entry]'}</strong></li><li>Order frequency <strong>{form.frequency}</strong></li><li>Minimum to activate <strong>{form.minimumBusinesses || '[X businesses]'}</strong></li><li>Maximum pool size <strong>{form.maximumBusinesses ? `${form.maximumBusinesses} businesses` : 'No limit'}</strong></li><li>Matching radius <strong>{form.matchingRadius}</strong></li><li>Industry matching <strong>{form.industryMatching}</strong></li><li>Pool window <strong>{form.poolWindowDays} days</strong></li><li>Amia monitoring <strong>{form.monitoring || 'Not set up'}</strong></li></ul>
   if (launched) return <main className="pool-builder-page"><div className="category-breadcrumb shell">Home <span>›</span> Buying Pools</div><header><p className="eyebrow">Start a Buying Pool</p><h1>Tell us what you need.</h1></header><section className="pool-launch shell"><aside><p className="eyebrow">Step 5</p><h2>Pool Details</h2>{summary}<div className="pool-disclaimer">Buying pools unlock savings based on combined order volume across verified businesses.</div><div><button disabled>Save as Draft</button><button disabled>Launch Pool</button></div></aside><article style={{ backgroundImage: "linear-gradient(rgba(52,83,9,.75),rgba(52,83,9,.75)),url('/assets/carved-bg.png')" }}><div><p>Your pool is live.</p><h2>Amia is now matching your pool with nearby businesses ordering similar products. You’ll be notified the moment someone joins.</h2></div><footer><a href={`/buying-pools/${launched.id}`}>View Pool Status</a><a href="/buying-pools/create">Start another Pool</a></footer></article></section></main>
   const cards = {

@@ -90,6 +90,8 @@ function invalidCredentials() { return new ApiError(401, 'INVALID_CREDENTIALS', 
 const orderStatuses = ['pending_payment', 'order_received', 'processing', 'shipped', 'delivered', 'cancelled']
 const timelineSteps = ['order_received', 'processing', 'shipped', 'delivered']
 const sensitiveOrderFields = new Set(['cardNumber', 'securityCode', 'cvc', 'cvv', 'paymentToken'])
+const welcomeDiscountType = 'welcome-first-order'
+const welcomeDiscountPercent = 10
 
 function orderStatusLabel(status) {
   const labels = { pending_payment: 'Payment pending', order_received: 'Order received', processing: 'Processing', shipped: 'Shipped', delivered: 'Delivered', cancelled: 'Cancelled' }
@@ -102,6 +104,11 @@ function rejectSensitiveOrderData(value) {
     if (sensitiveOrderFields.has(key)) throw new ApiError(400, 'SENSITIVE_PAYMENT_DATA', `${key} must not be submitted`)
     if (entry && typeof entry === 'object') rejectSensitiveOrderData(entry)
   }
+}
+
+function activeWelcomeDiscount(db, user) {
+  if (!user?.id || db.orders.some((item) => item.userId === user.id)) return null
+  return (db.welcomeDiscounts || []).find((item) => item.userId === user.id && item.type === welcomeDiscountType && item.status === 'eligible' && !item.usedAt) || null
 }
 
 function searchOptions(query) {
@@ -195,6 +202,7 @@ export function createServices(store, environment = process.env) {
         const { token, session } = newAuthSession(timestamp, requestMeta)
         db.accounts.push(account)
         db.accountSecurity.push(authSecurity(userId, timestamp, passwordHashValue, session))
+        db.welcomeDiscounts.push({ id: store.id('welcome-discount'), userId, type: welcomeDiscountType, percent: welcomeDiscountPercent, status: 'eligible', createdAt: timestamp, usedAt: null, orderId: null })
         return { user: publicUser(account), session: publicSession(session), sessionToken: token, sessionExpiresAt: session.expiresAt }
       })
     },
@@ -265,7 +273,7 @@ export function createServices(store, environment = process.env) {
 
   const about = {
     async get() { return store.read('aboutPage') },
-    async section(id) { const page = await store.read('aboutPage'); const allowed = ['company', 'confidence', 'brands', 'testimonials', 'achievement', 'verification', 'impact', 'faq', 'closing']; if (!allowed.includes(id)) throw new ApiError(404, 'ABOUT_SECTION_NOT_FOUND', 'About section not found'); const value = page[id]; if (!value) throw new ApiError(404, 'ABOUT_SECTION_NOT_FOUND', 'About section not found'); return value },
+    async section(id) { const page = await store.read('aboutPage'); const allowed = ['company', 'confidence', 'brands', 'sustainability', 'testimonials', 'achievement', 'verification', 'impact', 'faq', 'closing']; if (!allowed.includes(id)) throw new ApiError(404, 'ABOUT_SECTION_NOT_FOUND', 'About section not found'); const value = page[id]; if (!value) throw new ApiError(404, 'ABOUT_SECTION_NOT_FOUND', 'About section not found'); return value },
   }
   const categories = {
     async list(query) {
@@ -464,17 +472,18 @@ export function createServices(store, environment = process.env) {
   }
 
   async function buyingPoolRows(user) {
-    const [pools, participants, products, profiles] = await Promise.all(['buyingPools', 'buyingPoolParticipants', 'products', 'sellerProfiles'].map((name) => store.read(name)))
+    const [pools, participants, products, profiles, categories] = await Promise.all(['buyingPools', 'buyingPoolParticipants', 'products', 'sellerProfiles', 'categories'].map((name) => store.read(name)))
+    const categoryById = new Map(categories.map((item) => [item.id, item]))
     return pools.map((pool) => {
-      const joins = participants.filter((item) => item.poolId === pool.id); const participantCount = pool.baseParticipants + joins.length; const product = products.find((item) => item.id === pool.productId); const supplier = profiles.find((item) => item.id === pool.supplierId)
-      return { ...pool, status: buyingPoolStatus(pool, participantCount), participantCount, remainingPlaces: Math.max(0, pool.targetBusinesses - participantCount), progressPercent: Math.min(100, Math.round(participantCount / pool.targetBusinesses * 100)), joined: Boolean(user?.authenticated && joins.some((item) => item.userId === user.id)), product: product ? { id: product.id, title: product.title, image: product.image, originalPrice: product.price, currency: product.currency, rating: product.rating } : null, supplier: supplier ? { id: supplier.id, name: supplier.displayName, verified: supplier.verificationStatus === 'approved' } : null }
+      const joins = participants.filter((item) => item.poolId === pool.id); const participantCount = pool.baseParticipants + joins.length; const product = products.find((item) => item.id === pool.productId); const supplier = profiles.find((item) => item.id === pool.supplierId); const categoryId = pool.categoryId || product?.categoryId || null; const category = categoryId ? categoryById.get(categoryId) : null; const committedQuantity = pool.committedQuantity ?? pool.minimumQuantity * participantCount; const targetQuantity = pool.targetQuantity ?? pool.minimumQuantity * pool.targetBusinesses
+      return { ...pool, categoryId, category: category ? { id: category.id, name: category.name, slug: category.slug } : null, objective: pool.objective || pool.productName || product?.title || 'Collective procurement order', targetQuantity, committedQuantity, status: buyingPoolStatus(pool, participantCount), participantCount, remainingPlaces: Math.max(0, pool.targetBusinesses - participantCount), progressPercent: Math.min(100, Math.round(participantCount / pool.targetBusinesses * 100)), joined: Boolean(user?.authenticated && joins.some((item) => item.userId === user.id)), product: product ? { id: product.id, title: product.title, image: product.image, originalPrice: product.price, currency: product.currency, rating: product.rating } : null, supplier: supplier ? { id: supplier.id, name: supplier.displayName, verified: supplier.verificationStatus === 'approved' } : null }
     })
   }
 
   const buyingPools = {
     async list(query, user) {
       const q = text(query.get('q') || query.get('search'), 'search', { max: 160, required: false })?.toLowerCase(); const industry = query.get('industry'); const status = query.get('status') || 'current'; const sort = query.get('sort') || 'filling-fast'
-      const industries = ['restaurants-cafes', 'bars-nightlife', 'hotels-hospitality', 'gyms-fitness', 'clinics-healthcare', 'salons-spas', 'retail-boutiques']
+      const industries = ['restaurants-cafes', 'bars-nightlife', 'hotels-hospitality', 'gyms-fitness', 'clinics-healthcare', 'salons-spas', 'retail-boutiques', 'office-workspaces', 'custom']
       if (industry && !industries.includes(industry)) throw new ApiError(400, 'VALIDATION_ERROR', 'industry is not supported')
       if (!['current', 'all', 'open', 'almost-full', 'full', 'upcoming', 'expired'].includes(status)) throw new ApiError(400, 'VALIDATION_ERROR', 'status is not supported')
       if (!['filling-fast', 'ending-soon', 'newest', 'title'].includes(sort)) throw new ApiError(400, 'VALIDATION_ERROR', 'sort is not supported')
@@ -483,7 +492,7 @@ export function createServices(store, environment = process.env) {
       return paginate(rows, query)
     },
     async get(id, user) { const pool = (await buyingPoolRows(user)).find((item) => item.id === id && (item.status !== 'draft' || (user?.authenticated && item.createdBy === user.id))); if (!pool) throw new ApiError(404, 'BUYING_POOL_NOT_FOUND', 'Buying Pool not found'); return pool },
-    async industries() { return [{ id: 'restaurants-cafes', name: 'Restaurants & Cafés' }, { id: 'bars-nightlife', name: 'Bars & Nightlife' }, { id: 'hotels-hospitality', name: 'Hotels & Hospitality' }, { id: 'gyms-fitness', name: 'Gyms & Fitness Studios' }, { id: 'clinics-healthcare', name: 'Clinics & Healthcare' }, { id: 'salons-spas', name: 'Salons & Spas' }, { id: 'retail-boutiques', name: 'Retail & Boutiques' }] },
+    async industries() { return [{ id: 'restaurants-cafes', name: 'Restaurants & Cafés' }, { id: 'bars-nightlife', name: 'Bars & Nightlife' }, { id: 'hotels-hospitality', name: 'Hotels & Hospitality' }, { id: 'gyms-fitness', name: 'Gyms & Fitness Studios' }, { id: 'clinics-healthcare', name: 'Clinics & Healthcare' }, { id: 'salons-spas', name: 'Salons & Spas' }, { id: 'retail-boutiques', name: 'Retail & Boutiques' }, { id: 'office-workspaces', name: 'Office Workspaces' }] },
     async join(id, user) {
       if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to join a Buying Pool')
       return store.mutate((db) => { const pool = db.buyingPools.find((item) => item.id === id); if (!pool) throw new ApiError(404, 'BUYING_POOL_NOT_FOUND', 'Buying Pool not found'); const count = pool.baseParticipants + db.buyingPoolParticipants.filter((item) => item.poolId === id).length; const status = buyingPoolStatus(pool, count); if (!['open', 'almost-full'].includes(status)) throw new ApiError(409, 'BUYING_POOL_CLOSED', 'This Buying Pool is no longer accepting participants'); if (db.buyingPoolParticipants.some((item) => item.poolId === id && item.userId === user.id)) throw new ApiError(409, 'ALREADY_JOINED', 'You have already joined this Buying Pool'); const participation = { id: store.id('pool-participant'), poolId: id, userId: user.id, joinedAt: new Date().toISOString() }; db.buyingPoolParticipants.push(participation); return participation })
@@ -499,7 +508,7 @@ export function createServices(store, environment = process.env) {
       if (!['same-industry', 'compatible'].includes(industryMatching)) throw new ApiError(400, 'VALIDATION_ERROR', 'industryMatching is not supported')
       if (body.publish !== undefined && typeof body.publish !== 'boolean') throw new ApiError(400, 'VALIDATION_ERROR', 'publish must be a boolean')
       const timestamp = new Date().toISOString(); const endTime = new Date(Date.now() + poolWindowDays * 86400000).toISOString(); const status = body.publish === true ? 'open' : 'draft'
-      return store.mutate((db) => { const pool = { id: store.id('pool'), title: `${productName} Buying Pool`, description: `${frequency[0].toUpperCase()}${frequency.slice(1)} collective order for ${productName}.`, productName, preferredSupplier, industry: 'custom', location, productId: null, supplierId: null, targetBusinesses: maximumBusinesses || minimumBusinesses, minimumBusinesses, maximumBusinesses, baseParticipants: 1, groupPrice: null, minimumQuantity: orderQuantity, orderQuantity, targetVolume, frequency, matchingRadius, industryMatching, poolWindowDays, monitoring, status, createdBy: user.id, startTime: timestamp, endTime, image: '/assets/carved-bg.png', createdAt: timestamp, updatedAt: timestamp, publishedAt: status === 'open' ? timestamp : null }; db.buyingPools.push(pool); return pool })
+      return store.mutate((db) => { const normalized = productName.toLowerCase(); const categoryId = normalized.includes('decor') || normalized.includes('décor') ? 'home-decoration' : normalized.includes('office') ? 'office-supplies' : normalized.includes('furniture') || normalized.includes('chair') || normalized.includes('table') ? 'furniture' : null; const pool = { id: store.id('pool'), title: `${productName} Buying Pool`, description: `${frequency[0].toUpperCase()}${frequency.slice(1)} collective order for ${productName}.`, productName, preferredSupplier, industry: 'custom', categoryId, location, objective: productName, productId: null, supplierId: null, targetBusinesses: maximumBusinesses || minimumBusinesses, minimumBusinesses, maximumBusinesses, baseParticipants: 1, targetQuantity: targetVolume, committedQuantity: orderQuantity, groupPrice: null, minimumQuantity: orderQuantity, orderQuantity, targetVolume, frequency, matchingRadius, industryMatching, poolWindowDays, monitoring, status, createdBy: user.id, startTime: timestamp, endTime, image: '/assets/carved-bg.png', createdAt: timestamp, updatedAt: timestamp, publishedAt: status === 'open' ? timestamp : null }; db.buyingPools.push(pool); return pool })
     },
     async mine(user) { if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to view your Buying Pools'); return (await buyingPoolRows(user)).filter((item) => item.createdBy === user.id).sort(newestFirst) },
   }
@@ -714,28 +723,28 @@ export function createServices(store, environment = process.env) {
 
       categoryRows.filter((item) => item.active).forEach((item) => {
         if (!categoryMatches(item)) return
-        add('category', [item.name, ...item.children], { id: item.id, title: item.name, description: item.children.join(', '), href: '#categories' })
+        add('category', [item.name, ...item.children], { id: item.id, title: item.name, description: item.children.join(', '), href: `/categories?category=${encodeURIComponent(item.id)}` })
       })
       products.filter((item) => item.active).forEach((item) => {
         const category = categoryById.get(item.categoryId)
         if (!categoryMatches(category)) return
-        const base = { id: item.id, title: item.title, description: category?.name || 'Marketplace product', category: category?.name, image: item.image, href: '#featured' }
+        const base = { id: item.id, title: item.title, description: category?.name || 'Marketplace product', category: category?.name, image: item.image, href: `/products/${encodeURIComponent(item.id)}` }
         add('product', [item.title, category?.name], base)
         if (item.discountPercent > 0 && options.types?.has('flash-sale')) add('flash-sale', [item.title, category?.name, 'flash sale'], { ...base, description: `${item.discountPercent}% flash sale · ${base.description}` })
       })
       promotions.filter((item) => item.active).forEach((item) => {
         if (options.category && normalizeSearch(item.category) !== options.category) return
-        add('seller-promotion', [item.sellerName, item.category, item.text], { id: item.id, title: item.sellerName, description: item.text, category: item.category, image: item.avatar, href: '#featured' })
+        add('seller-promotion', [item.sellerName, item.category, item.text], { id: item.id, title: item.sellerName, description: item.text, category: item.category, image: item.avatar, href: `/seller-promotions/${encodeURIComponent(item.id)}` })
       })
       auctions.filter((item) => item.status !== 'cancelled').forEach((item) => {
         const category = categoryById.get(item.categoryId)
         if (!categoryMatches(category)) return
-        add('auction', [item.title, item.description, category?.name], { id: item.id, title: item.title, description: item.description || 'Marketplace auction', category: category?.name, image: item.image, href: '#reviews' })
+        add('auction', [item.title, item.description, category?.name], { id: item.id, title: item.title, description: item.description || 'Marketplace auction', category: category?.name, image: item.images?.[0], href: `/auctions/${encodeURIComponent(item.id)}` })
       })
       if (affiliateProgram && typeAllowed('affiliate-program')) {
-        add('affiliate-program', [affiliateProgram.title, affiliateProgram.description, 'service rewards impact'], { id: affiliateProgram.id, title: affiliateProgram.title, description: affiliateProgram.description, href: '#sell' })
+        add('affiliate-program', [affiliateProgram.title, affiliateProgram.description, 'service rewards impact'], { id: affiliateProgram.id, title: affiliateProgram.title, description: affiliateProgram.description, href: '/account/affiliate' })
       }
-      communityMessages.forEach((item) => add('community-post', [item.userName, item.text], { id: item.id, title: item.userName, description: item.text, image: item.avatar, href: '#support' }))
+      communityMessages.forEach((item) => add('community-post', [item.userName, item.text], { id: item.id, title: item.userName, description: item.text, image: item.avatar, href: '/support' }))
 
       results.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
       const total = results.length
@@ -1059,11 +1068,17 @@ export function createServices(store, environment = process.env) {
     const shipping = items.length ? (items.some((item) => item.shippingMethod === 'air') ? 600000 : 350000) : 0
     const coupon = db.cartCoupons.find((item) => item.userId === user.id) || null
     if (coupon && coupon.code !== 'BUYAMIA10') throw new ApiError(400, 'INVALID_COUPON', 'This promotional code is invalid or expired')
+    const welcomeDiscount = activeWelcomeDiscount(db, user)
+    if (coupon && welcomeDiscount) throw new ApiError(409, 'PROMOTION_NOT_COMBINABLE', 'The welcome discount cannot be combined with another promotion')
     const automaticDiscount = subtotal >= 3000000 ? 350000 : 0
     const couponDiscount = coupon?.code === 'BUYAMIA10' ? Math.min(Math.round(subtotal * .1), 500000) : 0
-    const discount = Math.max(automaticDiscount, couponDiscount)
+    const automaticDiscountLine = automaticDiscount > 0 ? { type: 'automatic', label: 'Sale', amount: automaticDiscount } : null
+    const couponDiscountLine = couponDiscount > 0 ? { type: 'coupon', code: coupon.code, label: 'Promo code', percent: 10, amount: couponDiscount } : null
+    const welcomeDiscountLine = welcomeDiscount && subtotal > 0 ? { type: welcomeDiscountType, id: welcomeDiscount.id, label: 'Welcome discount (10%)', percent: welcomeDiscountPercent, amount: Math.round(subtotal * welcomeDiscountPercent / 100) } : null
+    const discountLine = welcomeDiscountLine || couponDiscountLine || automaticDiscountLine
+    const discount = discountLine?.amount || 0
     const taxes = 0
-    return { items, summary: { itemCount: items.reduce((sum, item) => sum + item.quantity, 0), subtotal, shipping, discount, taxes, total: Math.max(0, subtotal + shipping + taxes - discount), currency: 'IDR', coupon: coupon?.code || null, deliveryEstimate: items.length ? '7–14 business days' : null } }
+    return { items, summary: { itemCount: items.reduce((sum, item) => sum + item.quantity, 0), subtotal, shipping, discount, discountLabel: discountLine?.label || 'Sale', discounts: discountLine ? [discountLine] : [], taxes, total: Math.max(0, subtotal + shipping + taxes - discount), currency: 'IDR', coupon: coupon?.code || null, welcomeDiscount: welcomeDiscount ? { eligible: true, percent: welcomeDiscountPercent, amount: welcomeDiscountLine?.amount || 0 } : { eligible: false, percent: welcomeDiscountPercent, amount: 0 }, deliveryEstimate: items.length ? '7–14 business days' : null } }
   }
 
   function orderShippingAddress(db, user) {
@@ -1146,7 +1161,16 @@ export function createServices(store, environment = process.env) {
     async remove(id, user) { await store.mutate((db) => { const index = db.cartItems.findIndex((item) => item.id === id && item.userId === user.id); if (index < 0) throw new ApiError(404, 'CART_ITEM_NOT_FOUND', 'Cart item not found'); db.cartItems.splice(index, 1) }); return cartView(user) },
     async clear(user) { await store.mutate((db) => { db.cartItems = db.cartItems.filter((item) => item.userId !== user.id); db.cartCoupons = db.cartCoupons.filter((item) => item.userId !== user.id) }); return cartView(user) },
     async save(id, user) { await store.mutate((db) => { const index = db.cartItems.findIndex((item) => item.id === id && item.userId === user.id); if (index < 0) throw new ApiError(404, 'CART_ITEM_NOT_FOUND', 'Cart item not found'); db.savedCartItems.push({ ...db.cartItems.splice(index, 1)[0], savedAt: new Date().toISOString() }) }); return cartView(user) },
-    async coupon(body, user) { const code = text(body.code, 'code', { max: 30 }).toUpperCase(); if (code !== 'BUYAMIA10') throw new ApiError(400, 'INVALID_COUPON', 'This promotional code is invalid or expired'); await store.mutate((db) => { db.cartCoupons = db.cartCoupons.filter((item) => item.userId !== user.id); db.cartCoupons.push({ userId: user.id, code, appliedAt: new Date().toISOString() }) }); return cartView(user) },
+    async coupon(body, user) {
+      const code = text(body.code, 'code', { max: 30 }).toUpperCase()
+      if (code !== 'BUYAMIA10') throw new ApiError(400, 'INVALID_COUPON', 'This promotional code is invalid or expired')
+      await store.mutate((db) => {
+        if (activeWelcomeDiscount(db, user)) throw new ApiError(409, 'PROMOTION_NOT_COMBINABLE', 'The welcome discount cannot be combined with another promotion')
+        db.cartCoupons = db.cartCoupons.filter((item) => item.userId !== user.id)
+        db.cartCoupons.push({ userId: user.id, code, appliedAt: new Date().toISOString() })
+      })
+      return cartView(user)
+    },
     async recommendations() { return (await store.read('products')).filter((product) => product.active && product.featured).slice(0, 4) },
   }
 
@@ -1203,10 +1227,13 @@ export function createServices(store, environment = process.env) {
           subtotal: cartData.summary.subtotal,
           shippingCost: cartData.summary.shipping,
           discount: cartData.summary.discount,
+          discountLabel: cartData.summary.discountLabel,
+          discounts: cartData.summary.discounts,
           taxes: cartData.summary.taxes,
           total: cartData.summary.total,
           itemCount: cartData.summary.itemCount,
           coupon: cartData.summary.coupon,
+          welcomeDiscount: cartData.summary.welcomeDiscount,
           shipping: { carrier: 'Buyamia Logistics', service: cartData.items.some((item) => item.shippingMethod === 'air') ? 'Air Freight' : 'Sea Freight', destination: orderShippingAddress(db, user).country || 'To be confirmed' },
           shippingAddress: orderShippingAddress(db, user),
           deliveryEstimate: cartData.summary.deliveryEstimate,
@@ -1216,7 +1243,13 @@ export function createServices(store, environment = process.env) {
           createdAt: timestamp,
           updatedAt: timestamp,
         }
+        const consumedWelcomeDiscount = activeWelcomeDiscount(db, user)
         db.orders.push(order)
+        if (consumedWelcomeDiscount && cartData.summary.discounts.some((item) => item.type === welcomeDiscountType)) {
+          consumedWelcomeDiscount.status = 'used'
+          consumedWelcomeDiscount.usedAt = timestamp
+          consumedWelcomeDiscount.orderId = orderId
+        }
         db.cartItems = db.cartItems.filter((item) => item.userId !== user.id)
         db.cartCoupons = db.cartCoupons.filter((item) => item.userId !== user.id)
         db.checkoutSessions = db.checkoutSessions.filter((item) => item.userId !== user.id)
@@ -1283,6 +1316,23 @@ export function createServices(store, environment = process.env) {
     async updateProfile(body, user) { const current = await this.profile(user); const displayName = text(body.displayName ?? current.displayName, 'displayName', { max: 120 }); const bio = text(body.bio ?? current.bio, 'bio', { max: 1200 }); const location = text(body.location ?? current.location, 'location', { max: 160 }); return store.mutate((db) => { const profile = db.sellerProfiles.find((item) => item.id === current.id); Object.assign(profile, { displayName, bio, location, updatedAt: new Date().toISOString() }); return profile }) },
     async dashboard(user) { const profile = await this.profile(user); const brand = (await store.read('brands')).find((item) => item.id === profile.brandId); const products = (await store.read('products')).filter((item) => brand?.productIds.includes(item.id)); const orders = (await store.read('orders')).filter((item) => item.seller?.id === profile.id); const notifications = (await store.read('notifications')).filter((item) => item.userId === user.id); return { profile, products, inventory: products.map((item) => ({ productId: item.id, available: item.stock ?? 100 })), orders, analytics: { productCount: products.length, orderCount: orders.length, revenue: orders.reduce((sum, item) => sum + item.total, 0) }, storeSettings: { public: profile.public }, payoutInformation: null, notifications } },
     async publicProfile(id) { const profile = (await store.read('sellerProfiles')).find((item) => item.id === id && item.public && item.verificationStatus === 'approved'); if (!profile) throw new ApiError(404, 'SELLER_NOT_FOUND', 'Seller not found'); const brand = (await store.read('brands')).find((item) => item.id === profile.brandId); const products = (await store.read('products')).filter((item) => brand?.productIds.includes(item.id) && item.active); return { ...profile, brand, products, reviews: [{ id: 'review-seller-1', name: 'Ellen', rating: 5, text: 'Beautifully made pieces with thoughtful details and reliable communication.' }], liveFeed: products.slice(0, 6) } },
+    async follow(id, user) {
+      await this.publicProfile(id)
+      return store.mutate((db) => {
+        const existing = db.sellerFollows.find((item) => item.userId === user.id && item.sellerId === id)
+        if (existing) return { ...existing, following: true }
+        const item = { id: store.id('seller-follow'), userId: user.id, sellerId: id, createdAt: new Date().toISOString() }
+        db.sellerFollows.push(item)
+        return { ...item, following: true }
+      })
+    },
+    async unfollow(id, user) {
+      return store.mutate((db) => {
+        const index = db.sellerFollows.findIndex((item) => item.userId === user.id && item.sellerId === id)
+        if (index >= 0) db.sellerFollows.splice(index, 1)
+        return { sellerId: id, following: false }
+      })
+    },
   }
 
   function auctionStatus(auction) { const now = Date.now(); if (auction.status === 'cancelled') return 'cancelled'; if (now < new Date(auction.startTime).getTime()) return 'upcoming'; if (now >= new Date(auction.endTime).getTime()) return 'completed'; return 'live' }
@@ -1421,6 +1471,24 @@ export function createServices(store, environment = process.env) {
     },
   }
 
+  const newsletter = {
+    async subscribe(body, user) {
+      const email = normalizeEmail(body.email)
+      const source = text(body.source || 'site', 'source', { max: 80, required: false }) || 'site'
+      return store.mutate((db) => {
+        const timestamp = new Date().toISOString()
+        let subscription = db.newsletterSubscriptions.find((item) => item.email === email)
+        if (!subscription) {
+          subscription = { id: store.id('newsletter'), email, userId: user?.authenticated ? user.id : null, source, createdAt: timestamp, updatedAt: timestamp }
+          db.newsletterSubscriptions.push(subscription)
+        } else {
+          Object.assign(subscription, { userId: subscription.userId || (user?.authenticated ? user.id : null), source, updatedAt: timestamp })
+        }
+        return subscription
+      })
+    },
+  }
+
   const nodeManifest = {
     async get(supplierId) {
       const [profiles, brands, products, pools, participants] = await Promise.all(['sellerProfiles', 'brands', 'products', 'buyingPools', 'buyingPoolParticipants'].map((name) => store.read(name)))
@@ -1434,5 +1502,5 @@ export function createServices(store, environment = process.env) {
 
   const admin = createAdminService(store, environment, { ApiError, text, paginate })
 
-  return { auth, about, categories, products, marketplace, buyingPools, flashSales, fastSelling, sellerPromotions, brands, source, search, community, chat, account, affiliate, support, cart, checkout, orders, seller, auctions, auctionListings, concierge, promoFeedback, nodeManifest, admin }
+  return { auth, about, categories, products, marketplace, buyingPools, flashSales, fastSelling, sellerPromotions, brands, source, search, community, chat, account, affiliate, support, cart, checkout, orders, seller, auctions, auctionListings, concierge, promoFeedback, newsletter, nodeManifest, admin }
 }

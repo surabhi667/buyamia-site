@@ -25,9 +25,9 @@ function ProductSuggestions({ products }) {
   return (
     <div className="amia-chat__products">
       {products.map((product) => (
-        <a href="#featured" key={product.title}>
+        <a href={product.id ? `/products/${product.id}` : '/categories'} key={product.id || product.title}>
           <img src={product.image} alt="" />
-          <span><strong>{product.title}</strong><small>{product.offer}<i>☆ 5/5</i></small></span>
+          <span><strong>{product.title}</strong><small>{product.offer || product.priceLabel}<i>☆ {product.rating || 5}/5</i></small></span>
         </a>
       ))}
     </div>
@@ -138,36 +138,45 @@ export default function ChatWindow() {
   const [messages, setMessages] = useState(initialMessages)
   const [draft, setDraft] = useState('')
   const [typing, setTyping] = useState(false)
+  const [conversationId, setConversationId] = useState(null)
+  const [error, setError] = useState('')
   const historyRef = useRef(null)
-  const responseTimerRef = useRef(null)
 
   useEffect(() => {
     if (open && historyRef.current) historyRef.current.scrollTop = historyRef.current.scrollHeight
   }, [messages, open, typing])
 
-  useEffect(() => () => clearTimeout(responseTimerRef.current), [])
-
-  function sendMessage(text = draft) {
+  async function sendMessage(text = draft) {
     const cleanText = text.trim()
-    if (!cleanText) return
-    setMessages((current) => [...current, { id: Date.now(), role: 'user', text: cleanText, time: 'Just now' }])
+    if (!cleanText || typing) return
+    const optimistic = { id: Date.now(), role: 'user', text: cleanText, time: 'Just now' }
+    setMessages((current) => [...current, optimistic])
     setDraft('')
     setTyping(true)
-    clearTimeout(responseTimerRef.current)
-    responseTimerRef.current = setTimeout(() => {
-      setMessages((current) => [...current, {
-        id: Date.now() + 1,
+    setError('')
+    try {
+      const response = await fetch('/api/ask-amia/chat', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: cleanText, conversationId }) })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error?.message || 'Amia is unavailable right now.')
+      setConversationId(payload.data.conversationId)
+      const assistant = {
+        id: payload.data.assistantMessage.id,
         role: 'assistant',
-        text: 'Here are some marketplace options that match your brief:',
+        text: payload.data.assistantMessage.text,
         time: 'Just now',
-        products: [
-          { image: '/assets/featured-1.png', title: 'Coconut shell tableware set', offer: '-50%' },
-          { image: '/assets/featured-2.png', title: 'Stone pedestal side table', offer: '-30%' },
-          { image: '/assets/featured-3.png', title: 'Modern artisan accent chair', offer: '-70%' },
-        ],
-      }])
+        products: payload.data.assistantMessage.result?.products?.map((product) => ({
+          ...product,
+          priceLabel: new Intl.NumberFormat('en-US', { style: 'currency', currency: product.currency || 'IDR', maximumFractionDigits: 0 }).format(product.price || 0),
+        })),
+      }
+      setMessages((current) => [...current, assistant])
+    } catch (caught) {
+      setDraft(cleanText)
+      setError(caught.message)
+      setMessages((current) => current.filter((message) => message !== optimistic))
+    } finally {
       setTyping(false)
-    }, 650)
+    }
   }
 
   return (
@@ -188,6 +197,7 @@ export default function ChatWindow() {
             {prompts.map((prompt) => <button type="button" onClick={() => sendMessage(prompt)} key={prompt}>{prompt}</button>)}
           </div>}
           <ChatInput value={draft} onChange={setDraft} onSend={() => sendMessage()} />
+          {error && <p className="amia-chat__privacy" role="alert">{error}</p>}
           <p className="amia-chat__privacy">By chatting with Amia, you agree to our <u>Privacy Policy.</u></p>
         </div>
       )}

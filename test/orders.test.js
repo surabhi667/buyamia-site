@@ -102,7 +102,7 @@ function assertNoSensitiveData(value) {
 
 test('order creation persists an authenticated user order and clears the cart', async (t) => {
   const { request, store } = await withApi(t)
-  const { cookie } = await signup(request)
+  const { cookie, user } = await signup(request)
   await addCartItem(request, cookie)
   await saveDelivery(request, cookie)
 
@@ -115,13 +115,19 @@ test('order creation persists an authenticated user order and clears the cart', 
   assert.equal(payload.data.items.length, 1)
   assert.equal(payload.data.shippingAddress.line1, 'Jl. Test 1')
   assert.equal(payload.data.payment.label, 'Payment pending')
-  assert.equal(payload.data.total, 1850000)
+  assert.equal(payload.data.discount, 150000)
+  assert.equal(payload.data.discountLabel, 'Welcome discount (10%)')
+  assert.deepEqual(payload.data.discounts.map((item) => ({ type: item.type, percent: item.percent, amount: item.amount })), [{ type: 'welcome-first-order', percent: 10, amount: 150000 }])
+  assert.equal(payload.data.total, 1700000)
   assertNoSensitiveData(payload)
 
   const cart = await request('/api/cart', { cookie })
   assert.equal(cart.payload.data.items.length, 0)
   const state = await store.getState()
   assert.equal(state.orders.length, 2)
+  const welcome = state.welcomeDiscounts.find((item) => item.userId === user.id)
+  assert.equal(welcome.status, 'used')
+  assert.equal(welcome.orderId, payload.data.id)
 })
 
 test('order creation rejects unauthenticated requests', async (t) => {
@@ -159,7 +165,8 @@ test('order creation recalculates prices server-side and ignores falsified clien
   assert.equal(response.status, 201)
   assert.equal(payload.data.items[0].unitPrice, 1500000)
   assert.equal(payload.data.items[0].lineTotal, 1500000)
-  assert.equal(payload.data.total, 1850000)
+  assert.equal(payload.data.discount, 150000)
+  assert.equal(payload.data.total, 1700000)
 })
 
 test('order creation rejects invalid cart quantity and keeps the cart', async (t) => {
@@ -177,6 +184,7 @@ test('order creation rejects invalid cart quantity and keeps the cart', async (t
   assert.equal(payload.error.code, 'INVALID_CART_QUANTITY')
   const state = await store.getState()
   assert.equal(state.cartItems.some((item) => item.userId === user.id), true)
+  assert.equal(state.welcomeDiscounts.find((item) => item.userId === user.id).status, 'eligible')
 })
 
 test('order creation rejects invalid promotions and preserves the cart', async (t) => {
@@ -195,6 +203,23 @@ test('order creation rejects invalid promotions and preserves the cart', async (
   assert.equal(state.cartItems.some((item) => item.userId === user.id), true)
 })
 
+test('order creation refuses to combine welcome discount with another promotion', async (t) => {
+  const { request, store } = await withApi(t)
+  const { cookie, user } = await signup(request)
+  await addCartItem(request, cookie)
+  await store.mutate((db) => {
+    db.cartCoupons.push({ userId: user.id, code: 'BUYAMIA10', appliedAt: new Date().toISOString() })
+  })
+
+  const { response, payload } = await createOrder(request, cookie, 'welcome-plus-coupon')
+
+  assert.equal(response.status, 409)
+  assert.equal(payload.error.code, 'PROMOTION_NOT_COMBINABLE')
+  const state = await store.getState()
+  assert.equal(state.cartItems.some((item) => item.userId === user.id), true)
+  assert.equal(state.welcomeDiscounts.find((item) => item.userId === user.id).status, 'eligible')
+})
+
 test('order creation is idempotent for repeated keys', async (t) => {
   const { request, store } = await withApi(t)
   const { cookie, user } = await signup(request)
@@ -206,8 +231,32 @@ test('order creation is idempotent for repeated keys', async (t) => {
   assert.equal(first.response.status, 201)
   assert.equal(second.response.status, 200)
   assert.equal(second.payload.data.id, first.payload.data.id)
+  assert.equal(first.payload.data.discount, 150000)
+  assert.equal(second.payload.data.discount, 150000)
   const state = await store.getState()
   assert.equal(state.orders.filter((item) => item.userId === user.id).length, 1)
+  assert.equal(state.welcomeDiscounts.filter((item) => item.userId === user.id && item.status === 'used').length, 1)
+})
+
+test('welcome discount does not apply to a second order', async (t) => {
+  const { request, store } = await withApi(t)
+  const { cookie, user } = await signup(request)
+  await addCartItem(request, cookie)
+  const first = await createOrder(request, cookie, 'first-welcome-order')
+  await addCartItem(request, cookie)
+  const secondCart = await request('/api/cart', { cookie })
+  const second = await createOrder(request, cookie, 'second-without-welcome')
+
+  assert.equal(first.response.status, 201)
+  assert.equal(first.payload.data.discount, 150000)
+  assert.equal(secondCart.payload.data.summary.welcomeDiscount.eligible, false)
+  assert.equal(secondCart.payload.data.summary.discount, 0)
+  assert.equal(second.response.status, 201)
+  assert.equal(second.payload.data.discount, 0)
+  assert.equal(second.payload.data.total, 1850000)
+  const state = await store.getState()
+  assert.equal(state.welcomeDiscounts.filter((item) => item.userId === user.id && item.status === 'used').length, 1)
+  assert.equal(state.orders.filter((item) => item.userId === user.id).length, 2)
 })
 
 test('orders are isolated between users', async (t) => {

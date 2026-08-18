@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 function money(value, currency) { return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency || 'IDR', maximumFractionDigits: 0 }).format(value || 0) }
 
 async function api(url, options) {
-  const response = await fetch(url, options)
+  const response = await fetch(url, { credentials: 'include', ...(options || {}) })
   const payload = await response.json()
   if (!response.ok) throw new Error(payload.error?.message || 'Unable to load affiliate information.')
   return payload.data

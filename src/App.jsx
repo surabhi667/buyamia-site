@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { LeftSidebar, RightSidebar } from './components/Sidebars'
 import ChatWindow from './components/ChatWindow'
 import SearchBar from './components/SearchBar'
@@ -34,6 +34,8 @@ import BuyingPoolsPage from './components/BuyingPoolsPage'
 import PromoFeedbackPopup from './components/PromoFeedbackPopup'
 import ProductPage from './components/ProductPage'
 import CreateCategoryPageView from './components/CreateCategoryPage'
+import { navigateTo, shoppingRoute } from './navigation'
+import { nextBannerIndex, promoBannerMessages } from './promoBanner'
 import './App.css'
 
 const categories = [
@@ -49,21 +51,25 @@ const categories = [
 
 const featured = [
   {
+    id: 'prod-bamboo-table',
     title: 'Eco Friendly Coconut Shell Wood Kitchenware Set',
     image: '/assets/featured-1.png',
     price: 'IDR 1,000,000',
   },
   {
+    id: 'prod-stone-table',
     title: 'Stone Pedestal Side Tables',
     image: '/assets/featured-2.png',
     price: 'IDR 1,000,000',
   },
   {
+    id: 'prod-accent-chair',
     title: 'Modern Grey Accent Armchair',
     image: '/assets/featured-3.png',
     price: 'IDR 1,000,000',
   },
   {
+    id: 'prod-table-lamp',
     title: 'Teal Glass Apothecary Set',
     image: '/assets/featured-4.png',
     price: 'IDR 1,000,000',
@@ -72,21 +78,25 @@ const featured = [
 
 const decor = [
   {
+    id: 'prod-ceramic-vase',
     title: 'Artistic Ceramic Vase',
     image: '/assets/product-2.jpeg',
     price: 'IDR 1,000,000',
   },
   {
+    id: 'prod-table-lamp',
     title: 'Mushroom Table Lamp',
     image: '/assets/product-1.jpeg',
     price: 'IDR 1,000,000',
   },
   {
+    id: 'prod-ceramic-vase',
     title: 'Abstract Face Sculpture',
     image: '/assets/product-3.jpeg',
     price: 'IDR 1,000,000',
   },
   {
+    id: 'prod-bamboo-table',
     title: 'Minimal Wooden Form',
     image: '/assets/product-thumb.png',
     price: 'IDR 1,000,000',
@@ -111,9 +121,32 @@ const reviews = [
   },
 ]
 
-function ProductCard({ title, image, price }) {
+const categoryRoutes = {
+  'Home Decor': '/categories?category=home-decoration',
+  Art: '/categories?category=art',
+  'Beauty & Care': '/categories?category=beauty-care',
+  Furniture: '/categories?category=furniture',
+  'Clothing & Shoes': '/categories?category=clothing-shoes',
+  'Jewelry & Accessories': '/categories?category=jewelry-accessories',
+  'Toys & Entertainment': '/categories?category=toys-entertainment',
+  'Food & Beverage': '/categories?category=food-beverage',
+}
+
+function goTo(path) {
+  navigateTo(path)
+}
+
+function ProductCard({ id, title, image, price }) {
+  const destination = id ? `/products/${id}` : '/categories'
+  function open() { goTo(destination) }
+  function key(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      open()
+    }
+  }
   return (
-    <article className="product-card">
+    <article className="product-card" role="button" tabIndex="0" onClick={open} onKeyDown={key}>
       <div className="product-card__media">
         <img src={image} alt={title} />
       </div>
@@ -134,13 +167,16 @@ function ProductCard({ title, image, price }) {
 }
 
 function CarouselNav() {
+  function scroll(amount) {
+    window.scrollBy({ left: amount, top: 0, behavior: 'smooth' })
+  }
   return (
-    <div className="carousel-nav" aria-hidden="true">
-      <button type="button">←</button>
+    <div className="carousel-nav">
+      <button type="button" aria-label="Scroll left" onClick={() => scroll(-360)}>←</button>
       <div className="track">
         <span />
       </div>
-      <button type="button">→</button>
+      <button type="button" aria-label="Scroll right" onClick={() => scroll(360)}>→</button>
     </div>
   )
 }
@@ -149,10 +185,80 @@ function CreateCategoryPage() {
   return window.location.pathname === '/brands/create' ? <CreateBrandPage /> : <CreateCategoryPageView />
 }
 
+function useLocationKey() {
+  const current = () => `${window.location.pathname}${window.location.search}${window.location.hash}`
+  const [locationKey, setLocationKey] = useState(current)
+  useEffect(() => {
+    function updateLocation() {
+      setLocationKey(current())
+    }
+    window.addEventListener('popstate', updateLocation)
+    window.addEventListener('buyamia:navigate', updateLocation)
+    return () => {
+      window.removeEventListener('popstate', updateLocation)
+      window.removeEventListener('buyamia:navigate', updateLocation)
+    }
+  }, [])
+  return locationKey
+}
+
+function TopBanner({ onNavigate }) {
+  const [index, setIndex] = useState(0)
+  const [hovered, setHovered] = useState(false)
+  const [focused, setFocused] = useState(false)
+  const [reducedMotion, setReducedMotion] = useState(false)
+  const message = promoBannerMessages[index]
+  const paused = hovered || focused
+
+  useEffect(() => {
+    const media = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+    if (!media) return undefined
+    const update = () => setReducedMotion(media.matches)
+    update()
+    media.addEventListener?.('change', update)
+    return () => media.removeEventListener?.('change', update)
+  }, [])
+
+  useEffect(() => {
+    if (paused || reducedMotion) return undefined
+    const timer = window.setInterval(() => setIndex((current) => nextBannerIndex(current)), 5000)
+    return () => window.clearInterval(timer)
+  }, [paused, reducedMotion])
+
+  function activate(event) {
+    event.preventDefault()
+    if (message.action === 'signup') {
+      window.dispatchEvent(new CustomEvent('buyamia:auth-required', { detail: { mode: 'signup' } }))
+      return
+    }
+    onNavigate(message.href)
+  }
+
+  return (
+    <div className="top-banner" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+      <a
+        className="top-banner__link"
+        href={message.href}
+        onClick={activate}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+      >
+        <span className="top-banner__message" key={message.id}>{message.text}</span>
+        <span aria-hidden="true">{message.arrow}</span>
+      </a>
+    </div>
+  )
+}
+
 export default function App() {
+  const locationKey = useLocationKey()
   const caravanUrl = import.meta.env.VITE_CARAVAN_URL || 'http://localhost:5176/'
   const [leftOpen, setLeftOpen] = useState(false)
   const [rightOpen, setRightOpen] = useState(false)
+  const [amiaPrompt, setAmiaPrompt] = useState('')
+  const [webWide, setWebWide] = useState(false)
+  const [footerEmail, setFooterEmail] = useState('')
+  const [footerMessage, setFooterMessage] = useState('')
   if (window.location.pathname === '/admin') return <AdminPage />
   const isAccountPage = window.location.pathname === '/account'
   const isSupportPage = window.location.pathname === '/support'
@@ -165,7 +271,7 @@ export default function App() {
   const isAffiliatePage = window.location.pathname === '/account/affiliate' || window.location.pathname.startsWith('/account/affiliate/')
   const isCategoriesPage = window.location.pathname === '/categories'
   const isCreateCategoryPage = window.location.pathname === '/categories/create' || window.location.pathname === '/brands/create'
-  const isBrandsPage = window.location.pathname === '/brands'
+  const isBrandsPage = window.location.pathname === '/brands' || window.location.pathname.startsWith('/brands/')
   const isSourcePage = window.location.pathname === '/source'
   const isCartPage = window.location.pathname === '/cart' || window.location.pathname.startsWith('/checkout/')
   const isAskAmiaPage = window.location.pathname === '/ask-amia'
@@ -183,13 +289,21 @@ export default function App() {
   const isSellerPromotionsPage = window.location.pathname === '/seller-promotions' || window.location.pathname.startsWith('/seller-promotions/')
   const isBuyingPoolsPage = window.location.pathname === '/buying-pools' || window.location.pathname.startsWith('/buying-pools/')
   const productMatch = window.location.pathname.match(/^\/products\/([^/]+)$/)
+  async function joinNewsletter() {
+    setFooterMessage('')
+    try {
+      const response = await fetch('/api/newsletter', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: footerEmail, source: 'home-footer' }) })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error?.message || 'Unable to join.')
+      setFooterMessage('Joined.')
+    } catch (error) {
+      setFooterMessage(error.message)
+    }
+  }
 
   return (
     <div className={`site${leftOpen ? ' site--left-open' : ''}${rightOpen ? ' site--right-open' : ''}`}>
-      <div className="top-banner">
-        Discover and shop premium Indonesian products at our online wholesale marketplace
-        <span aria-hidden="true">→</span>
-      </div>
+      <TopBanner onNavigate={navigateTo} />
 
       <LeftSidebar open={leftOpen} onToggle={() => setLeftOpen((value) => !value)} />
       <RightSidebar open={rightOpen} onToggle={() => setRightOpen((value) => !value)} />
@@ -221,17 +335,17 @@ export default function App() {
             <a className="text-link" href="/sell-on-buyamia">
               Sell on Buyamia
             </a>
-            <button className="btn btn-accent" type="button">
+            <button className="btn btn-accent" type="button" onClick={() => goTo(shoppingRoute)}>
               Start Shopping
             </button>
-            <SearchBar />
+            <SearchBar onNavigate={navigateTo} />
           </div>
         </div>
       </header>
 
       {isCategoriesPage && <div className="category-create-entry shell"><a className="btn btn-charcoal" href="/categories/create">Create Category</a></div>}
 
-      {isCreateCategoryPage ? <CreateCategoryPage /> : productMatch ? <ProductPage id={decodeURIComponent(productMatch[1])} /> : isBuyingPoolsPage ? <BuyingPoolsPage /> : isSellerPromotionsPage ? <SellerPromotionsPage /> : isFastSellingPage ? <FastSellingPage /> : isFlashSalesPage ? <FlashSalesPage /> : isMarketplacesPage ? <MarketplacesPage /> : isAuctionsPage ? <AuctionsPage /> : isApiPage ? <ApiPage /> : isLegalPage ? <LegalPage /> : isPressPage ? <PressPage /> : isCareersPage ? <CareersPage /> : isAboutPage ? <AboutPage /> : isSellerPage ? <SellerExperiencePage /> : isSavedPage ? <SavedPage /> : isAskAmiaPage ? <AskAmiaPage /> : isCartPage ? <CartPage /> : isAccountPage ? <AccountPage /> : isShippingAddressesPage ? <ShippingAddressesPage /> : isSecurityPage ? <SecurityPage /> : isBankAccountsPage ? <BankAccountsPage /> : isOrdersPage ? <OrdersPage /> : isBrowsingHistoryPage ? <BrowsingHistoryPage /> : isWishlistPage ? <WishlistPage /> : isAffiliatePage ? <AffiliatePage /> : isCategoriesPage ? <CategoriesPage /> : isBrandsPage ? <BrandsPage /> : isSourcePage ? <SourcePage /> : isSupportPage ? <SupportPage /> : <>
+      {isCreateCategoryPage ? <CreateCategoryPage key={locationKey} /> : productMatch ? <ProductPage id={decodeURIComponent(productMatch[1])} key={locationKey} /> : isBuyingPoolsPage ? <BuyingPoolsPage key={locationKey} /> : isSellerPromotionsPage ? <SellerPromotionsPage key={locationKey} /> : isFastSellingPage ? <FastSellingPage key={locationKey} /> : isFlashSalesPage ? <FlashSalesPage key={locationKey} /> : isMarketplacesPage ? <MarketplacesPage key={locationKey} /> : isAuctionsPage ? <AuctionsPage key={locationKey} /> : isApiPage ? <ApiPage /> : isLegalPage ? <LegalPage /> : isPressPage ? <PressPage /> : isCareersPage ? <CareersPage /> : isAboutPage ? <AboutPage /> : isSellerPage ? <SellerExperiencePage key={locationKey} /> : isSavedPage ? <SavedPage key={locationKey} /> : isAskAmiaPage ? <AskAmiaPage key={locationKey} /> : isCartPage ? <CartPage key={locationKey} /> : isAccountPage ? <AccountPage /> : isShippingAddressesPage ? <ShippingAddressesPage /> : isSecurityPage ? <SecurityPage /> : isBankAccountsPage ? <BankAccountsPage /> : isOrdersPage ? <OrdersPage key={locationKey} /> : isBrowsingHistoryPage ? <BrowsingHistoryPage /> : isWishlistPage ? <WishlistPage /> : isAffiliatePage ? <AffiliatePage key={locationKey} /> : isCategoriesPage ? <CategoriesPage key={locationKey} /> : isBrandsPage ? <BrandsPage key={locationKey} /> : isSourcePage ? <SourcePage key={locationKey} /> : isSupportPage ? <SupportPage /> : <>
       <main>
         <section className="shell hero">
           <div className="hero-top">
@@ -283,12 +397,12 @@ export default function App() {
           <div className="live-panel">
             <aside className="live-side">
               <div className="mode-list">
-                <button className="active" type="button" onClick={() => window.open('http://localhost:3000', '_blank', 'noopener,noreferrer')}>
+                <button className="active" type="button" onClick={() => goTo('/flash-sales')}>
                   See live feeds <span>→</span>
                 </button>
                 <button type="button" onClick={() => window.open(caravanUrl, '_blank', 'noopener,noreferrer')}>Shop with friends</button>
-                <button type="button">Buy in bulk</button>
-                <button type="button">Build smarter with Buyamia&apos;s API</button>
+                <button type="button" onClick={() => goTo('/buying-pools')}>Buy in bulk</button>
+                <button type="button" onClick={() => goTo('/api-docs')}>Build smarter with Buyamia&apos;s API</button>
               </div>
               <div className="live-preview">
                 <span className="live-badge">● Live Now</span>
@@ -351,15 +465,16 @@ export default function App() {
             </p>
             <div className="amia-box">
               <textarea
-                defaultValue=""
+                value={amiaPrompt}
+                onChange={(event) => setAmiaPrompt(event.target.value)}
                 placeholder="e.g. 'I'm looking for sustainable rattan furniture for a 20-room boutique hotel...'"
               />
               <div className="amia-box__footer">
-                <label className="toggle">
+                <label className="toggle" role="button" tabIndex="0" aria-pressed={webWide} onClick={() => setWebWide((value) => !value)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setWebWide((value) => !value) } }}>
                   Search Web-Wide
                   <span aria-hidden="true" />
                 </label>
-                <button className="btn btn-charcoal" type="button">
+                <button className="btn btn-charcoal" type="button" onClick={() => goTo(amiaPrompt.trim() ? `/ask-amia?prompt=${encodeURIComponent(amiaPrompt.trim())}${webWide ? '&webWide=true' : ''}` : `/ask-amia${webWide ? '?webWide=true' : ''}`)}>
                   ✦ Ask Amia
                 </button>
               </div>
@@ -375,6 +490,7 @@ export default function App() {
                 className={`chip${category === 'Furniture' ? ' active' : ''}`}
                 key={category}
                 type="button"
+                onClick={() => goTo(categoryRoutes[category] || '/categories')}
               >
                 {category}
               </button>
@@ -427,7 +543,7 @@ export default function App() {
               <p className="eyebrow">Top Categories</p>
               <h2>Home Decorations</h2>
             </div>
-            <button className="ghost-btn" type="button">
+            <button className="ghost-btn" type="button" onClick={() => goTo('/categories?category=home-decoration')}>
               Browse More →
             </button>
           </div>
@@ -458,7 +574,7 @@ export default function App() {
                 <div className="way-visual">
                   <img src="/assets/design-chair.png" alt="" />
                 </div>
-                <button className="btn btn-accent btn-split" type="button">
+                <button className="btn btn-accent btn-split" type="button" onClick={() => goTo('/ask-amia?prompt=Build%20your%20own%20package')}>
                   <span>Build your own package with Amia</span>
                   <span className="divider" />
                   <span>→</span>
@@ -475,7 +591,7 @@ export default function App() {
                     the match and handles the coordination.
                   </p>
                 </div>
-                <button className="btn btn-charcoal btn-split" type="button">
+                <button className="btn btn-charcoal btn-split" type="button" onClick={() => goTo('/buying-pools')}>
                   <span>Join a Buying Pool</span>
                   <span className="divider" />
                   <span>→</span>
@@ -488,7 +604,7 @@ export default function App() {
                 <h3>
                   Shop <em>designer items</em>
                 </h3>
-                <button className="btn btn-accent btn-split" type="button">
+                <button className="btn btn-accent btn-split" type="button" onClick={() => goTo('/categories')}>
                   <span>Browse curated collections</span>
                   <span className="divider" />
                   <span>→</span>
@@ -515,7 +631,7 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-                <button className="btn btn-charcoal btn-split" type="button">
+                <button className="btn btn-charcoal btn-split" type="button" onClick={() => goTo('/fast-selling')}>
                   <span>Shop Best Sellers</span>
                   <span className="divider" />
                   <span>→</span>
@@ -563,14 +679,15 @@ export default function App() {
       <footer className="site-footer" id="sell">
         <div className="shell footer-grid">
           <div>
-            <div className="logo">buyamia</div>
+            <a className="logo" href="/">buyamia</a>
             <p>The intelligent everything marketplace network, sourced from Indonesia.</p>
             <div className="newsletter">
-              <input aria-label="Email" placeholder="Email address" type="email" />
-              <button className="btn btn-accent" type="button">
+              <input aria-label="Email" placeholder="Email address" type="email" value={footerEmail} onChange={(event) => setFooterEmail(event.target.value)} />
+              <button className="btn btn-accent" type="button" onClick={joinNewsletter}>
                 Join
               </button>
             </div>
+            {footerMessage && <p role="status">{footerMessage}</p>}
           </div>
           <div>
             <h4>Products</h4>
@@ -594,7 +711,7 @@ export default function App() {
             <h4>Company</h4>
             <ul>
               <li><a href="/about">About</a></li>
-              <li><a href="#impact">Impact</a></li>
+              <li><a href="/about#sustainability">Impact</a></li>
               <li><a href="/careers">Careers</a></li>
               <li><a href="/press">Press</a></li>
             </ul>

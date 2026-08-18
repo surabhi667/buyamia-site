@@ -46,8 +46,8 @@ export function LeftSidebar({ open, onToggle }) {
         <RailButton icon="saved" label="Saved items" onClick={() => { window.location.href = '/saved' }} />
         <RailButton icon="pool" label="Buying Pools" onClick={() => { window.location.href = '/buying-pools' }} />
         <div className="rail-rule" />
-        <RailButton icon="credit" label="Credit usage" />
-        <RailButton icon="location" label="Location and currency" />
+        <RailButton icon="credit" label="Credit usage" onClick={onToggle} controls="left-sidebar-panel" expanded={open} />
+        <RailButton icon="location" label="Location and currency" onClick={onToggle} controls="left-sidebar-panel" expanded={open} />
         <div className="rail-spacer" />
         <RailButton icon="account" label="My account" onClick={() => { window.location.href = '/account' }} />
         <RailButton icon="support" label="Support" onClick={() => { window.location.href = '/support' }} />
@@ -68,7 +68,7 @@ export function LeftSidebar({ open, onToggle }) {
 
         <section className="sidebar-card credit-card">
           <div className="card-title"><span>Credit usage</span><Icon name="credit" /></div>
-          <a href="#top-up">Top up <span>→</span></a>
+          <a href="/account">Top up <span>→</span></a>
           <div className="credit-meta"><span>750</span><span>Available 21,000</span></div>
           <div className="credit-track"><span /></div>
         </section>
@@ -141,7 +141,7 @@ const discussionMessages = [
 
 function ProductRows({ items, variant }) {
   return <div className="commerce-products">{items.map((item) => (
-    <a href={variant === 'flash' ? '/flash-sales' : variant === 'fast' ? '/fast-selling' : '#featured'} className="commerce-product" key={`${variant}-${item.title}`}>
+    <a href={variant === 'flash' ? '/flash-sales' : variant === 'fast' ? '/fast-selling' : '/categories'} className="commerce-product" key={`${variant}-${item.title}`}>
       <img src={item.image} alt="" />
       <span className="commerce-product__copy">
         <strong>{item.title}</strong>
@@ -170,7 +170,7 @@ function AuctionRows() {
   return (
     <div className="auction-products">
       {auctionProducts.map((item) => (
-        <a href="#featured" className="auction-product" key={item.title}>
+        <a href="/auctions" className="auction-product" key={item.title}>
           <img src={item.image} alt="" />
           <span>
             <strong>{item.title}</strong>
@@ -304,15 +304,38 @@ function AuthModal({ mode, open, onAuthenticated, onClose, onModeChange }) {
 }
 
 function CommunityChat({ loggedIn, loggingOut, onLogin, onLogout, onSignup }) {
-  const [messages, setMessages] = useState([...discussionMessages, { avatar: '/assets/avatar-3.png', name: 'Ayu', text: 'I found a great lighting maker near Ubud — happy to share details.' }])
+  const [messages, setMessages] = useState(discussionMessages)
   const [draft, setDraft] = useState('')
+  const [message, setMessage] = useState('')
 
-  function sendMessage(event) {
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch('/api/community/messages?limit=20', { credentials: 'include', signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json()
+        if (!response.ok) throw new Error(payload.error?.message || 'Unable to load community messages.')
+        setMessages(payload.data.map((item) => ({ avatar: item.avatar, name: item.userName, text: item.text })))
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') setMessage(error.message)
+      })
+    return () => controller.abort()
+  }, [])
+
+  async function sendMessage(event) {
     event.preventDefault()
     const text = draft.trim()
     if (!text) return
-    setMessages((current) => [...current, { avatar: '/assets/avatar-1.png', name: 'You', text }])
-    setDraft('')
+    setMessage('')
+    try {
+      const response = await fetch('/api/community/messages', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error?.message || 'Unable to send your message.')
+      setMessages((current) => [...current, { avatar: payload.data.avatar, name: payload.data.userName, text: payload.data.text }])
+      setDraft('')
+    } catch (error) {
+      setMessage(error.message)
+    }
   }
 
   return (
@@ -321,7 +344,7 @@ function CommunityChat({ loggedIn, loggingOut, onLogin, onLogout, onSignup }) {
         {(loggedIn ? messages : discussionMessages).map((message, index) => (
           <article className="chat-message" key={`${message.name}-${index}`}>
             <img src={message.avatar} alt="" />
-            <div><small>{message.name}</small><p>{message.text}</p>{!loggedIn && <button type="button">read more</button>}</div>
+            <div><small>{message.name}</small><p>{message.text}</p>{!loggedIn && <button type="button" onClick={onLogin}>read more</button>}</div>
           </article>
         ))}
       </div>
@@ -336,6 +359,7 @@ function CommunityChat({ loggedIn, loggingOut, onLogin, onLogout, onSignup }) {
       ) : (
         <div className="chat-login"><small>To chat, please</small><div><button type="button" onClick={onLogin}>Log In</button><button type="button" onClick={onSignup}>Sign Up</button></div></div>
       )}
+      {message && <p className="chat-privacy" role="status">{message}</p>}
       <p className="chat-privacy">By chatting on Buyamia, you agree to our Privacy Policy.</p>
     </div>
   )
@@ -396,7 +420,7 @@ export function RightSidebar({ open, onToggle }) {
 
   useEffect(() => {
     const controller = new AbortController()
-    fetch('/api/concierge/telegram/status', { signal: controller.signal })
+    fetch('/api/concierge/telegram/status', { credentials: 'include', signal: controller.signal })
       .then(async (response) => {
         const payload = await response.json()
         if (!response.ok) throw new Error(payload.error?.message || 'Telegram concierge is unavailable')
@@ -408,13 +432,19 @@ export function RightSidebar({ open, onToggle }) {
     return () => controller.abort()
   }, [])
 
-  async function startTelegram() {
+  async function startTelegram(event) {
     const popup = window.open('about:blank', '_blank')
     if (popup) popup.opener = null
     setTelegram((current) => ({ ...current, status: 'starting', error: '' }))
     try {
-      const response = await fetch('/api/concierge/telegram/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      const response = await fetch('/api/concierge/telegram/start', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       const payload = await response.json()
+      if (response.status === 401) {
+        popup?.close()
+        openAuthModal('login', event)
+        setTelegram((current) => ({ ...current, status: 'ready', error: payload.error?.message || 'Authentication required' }))
+        return
+      }
       if (!response.ok) throw new Error(payload.error?.message || 'Telegram concierge is unavailable')
       if (popup) popup.location.href = payload.data.url
       else window.location.href = payload.data.url
@@ -492,7 +522,7 @@ export function RightSidebar({ open, onToggle }) {
           <SidebarSection id="affiliate" label="Affiliate Program" open={expanded.has('affiliate')} onToggle={toggleSection}>
             <div className="affiliate-card">
               <p>Earn rewards. Create impact.<br />Connect the world.</p>
-              <button type="button">Apply Today <span aria-hidden="true">→</span></button>
+              <button type="button" onClick={() => { window.location.href = '/account/affiliate/register' }}>Apply Today <span aria-hidden="true">→</span></button>
             </div>
           </SidebarSection>
         </div>

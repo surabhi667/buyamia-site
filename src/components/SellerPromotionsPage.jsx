@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
+import AccountFooter from './AccountFooter'
 
 const money = (value, currency = 'IDR') => new Intl.NumberFormat('id-ID', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 const api = async (url) => { const response = await fetch(url); const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message || 'Unable to load seller promotions.'); return payload }
 
-function PromoFooter() { return <footer className="account-footer promo-footer shell"><div className="logo">buyamia</div><p>Buy some comfort. Buy<br />some care.</p><div><small>SHOP</small><span>All Products</span><span>Furniture</span><span>Home Decor</span></div><div><small>ABOUT US</small><span>About Us</span><span>Sustainability</span><span>Sell on Buyamia</span></div><div><small>SUPPORT</small><span>Help Center</span><span>Contact Us</span><span>FAQ</span></div></footer> }
+function PromoFooter() { return <AccountFooter className="promo-footer shell" /> }
 
 function PromoCard({ promotion }) {
   return <article className="promo-card"><a href={`/seller-promotions/${promotion.id}`}><div className="promo-card__media"><img src={promotion.image} alt={promotion.title} /><span>-{promotion.discountPercent}%</span>{promotion.featured && <em>Featured</em>}</div><header><img src={promotion.seller.avatar} alt="" /><span><small>{promotion.seller.verified ? 'Verified seller' : promotion.category.name}</small><strong>{promotion.seller.name}</strong></span></header><h2>{promotion.title}</h2><p>{promotion.description}</p><div className="promo-price"><del>{money(promotion.originalPrice, promotion.product?.currency)}</del><strong>{money(promotion.discountedPrice, promotion.product?.currency)}</strong></div><footer><span>{promotion.category.name}</span><span>{promotion.status}</span></footer></a></article>

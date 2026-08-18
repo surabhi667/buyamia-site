@@ -12,6 +12,11 @@ export const seedData = {
       { id: 'shipping', icon: '▣', title: 'Ship with Buyamia and Save', summary: 'Using our shipping services, you get the guaranteed best rate, negotiated by our expert team with years of experience.', description: 'For only 10% on the product price, we help you ship to wherever you need. All shipping charges are estimated. Additional charges may apply upon clearance.' },
     ] },
     brands: { eyebrow: 'Empowering Business Partners and Brands', title: 'Curated to deliver at any scale.', description: 'Whether your requirement is a curated selection for a boutique or a full procurement order for a 300-room hotel, our brands are equipped to meet it.', items: ['Wood & Soul', 'Bali Bambusa', 'Goodwood', 'Kayu Artisans', 'Sukma Living', 'Teaky'] },
+    sustainability: { eyebrow: 'Sustainability', title: 'Responsible sourcing for real procurement.', description: 'Buyamia highlights verified Indonesian makers, lower-waste materials, durable production, and consolidated buying flows that help businesses source with clearer environmental and social context.', items: [
+      { id: 'materials', icon: '✓', name: 'Eco-conscious materials' },
+      { id: 'makers', icon: '♢', name: 'Verified maker relationships' },
+      { id: 'pooling', icon: '▤', name: 'Consolidated orders' },
+    ] },
     testimonials: { eyebrow: 'Don’t take our word for it', title: 'Trusted by buyers around the world', items: [
       { id: 'ellen', name: 'Ellen', image: '/assets/review-1.png', rating: 5, text: 'A short snippet of review for a popular product goes here. Thoughtful quality and a smooth sourcing experience.', product: 'Eco Friendly Coconut Shell Wood Kitchenware Set' },
       { id: 'mark', name: 'Mark', image: '/assets/review-2.png', rating: 5, text: 'A short snippet of review for a popular product goes here. Clear communication from first brief to delivery.', product: 'Eco Friendly Coconut Shell Wood Kitchenware Set' },
@@ -53,9 +58,11 @@ export const seedData = {
   ].map((product) => ({ ...product, description: 'A distinctive Indonesian-made piece created for considered commercial and residential spaces.', images: [product.image, '/assets/product-1.jpeg', '/assets/product-2.jpeg', '/assets/product-3.jpeg'], minimumOrder: 10, shipping: ['Air Freight', 'Sea Freight'], customization: true, warranty: false, material: 'Wood · FNP · Rustic', dimensions: '215 cm × 90 cm × 165 cm', weight: '54 Kgs', impactTags: ['Heritage Craft', 'Eco Materials', 'Sustainable Design', 'Innovation', 'Woman Led'], active: true, createdAt: now, updatedAt: now })),
   productQuotes: [],
   buyingPools: [
-    { id: 'pool-kemang-cleaning', title: 'Kemang Hospitality Essentials', description: 'Restaurants and cafés combining recurring orders for cleaning and service supplies.', industry: 'restaurants-cafes', location: 'Kemang, Jakarta', productId: 'prod-bamboo-table', supplierId: 'seller-sari', targetBusinesses: 10, baseParticipants: 6, groupPrice: 1125000, minimumQuantity: 10, status: 'open', startTime: '2026-08-01T00:00:00.000Z', endTime: '2027-01-31T23:59:59.000Z', image: '/assets/review-1.png', createdAt: now, updatedAt: now },
-    { id: 'pool-bali-fitness', title: 'Bali Fitness Studio Refresh', description: 'Independent gyms pooling their furniture and wellness-area requirements for better volume pricing.', industry: 'gyms-fitness', location: 'Bali, Indonesia', productId: 'prod-accent-chair', supplierId: 'seller-sari', targetBusinesses: 10, baseParticipants: 6, groupPrice: 2380000, minimumQuantity: 12, status: 'open', startTime: '2026-08-01T00:00:00.000Z', endTime: '2027-02-15T23:59:59.000Z', image: '/assets/review-2.png', createdAt: now, updatedAt: now },
-    { id: 'pool-hotel-lobby', title: 'Boutique Hotel Lobby Collection', description: 'Boutique hotels sourcing a coordinated lobby collection from verified Indonesian makers.', industry: 'hotels-hospitality', location: 'Ubud, Bali', productId: 'prod-stone-table', supplierId: 'seller-sari', targetBusinesses: 12, baseParticipants: 8, groupPrice: 900000, minimumQuantity: 12, status: 'almost-full', startTime: '2026-08-01T00:00:00.000Z', endTime: '2027-01-20T23:59:59.000Z', image: '/assets/review-3.png', createdAt: now, updatedAt: now },
+    { id: 'pool-sustainable-hotel-furniture', title: 'Sustainable Hotel Furniture Procurement', description: 'Boutique hotels combining room and lobby furniture orders from verified Indonesian furniture makers.', industry: 'hotels-hospitality', categoryId: 'furniture', location: 'Ubud, Bali', objective: 'Furniture package for boutique hotel rooms and lobbies', productId: 'prod-accent-chair', supplierId: 'seller-sari', targetBusinesses: 12, baseParticipants: 7, targetQuantity: 180, committedQuantity: 105, groupPrice: 2380000, minimumQuantity: 15, status: 'open', startTime: '2026-08-01T00:00:00.000Z', endTime: '2027-01-31T23:59:59.000Z', image: '/assets/featured-3.png', createdAt: now, updatedAt: now },
+    { id: 'pool-handmade-home-decor-wholesale', title: 'Handmade Home Décor Wholesale Pool', description: 'Retail boutiques pooling wholesale orders for ceramic decor, lighting, and artisan home accents.', industry: 'retail-boutiques', categoryId: 'home-decoration', location: 'Seminyak, Bali', objective: 'Wholesale handmade home decor assortment', productId: 'prod-ceramic-vase', supplierId: 'seller-sari', targetBusinesses: 10, baseParticipants: 6, targetQuantity: 300, committedQuantity: 180, groupPrice: 850000, minimumQuantity: 30, status: 'open', startTime: '2026-08-01T00:00:00.000Z', endTime: '2027-02-10T23:59:59.000Z', image: '/assets/product-2.jpeg', createdAt: now, updatedAt: now },
+    { id: 'pool-hospitality-amenities', title: 'Hospitality Amenities Buying Pool', description: 'Hotels, villas, and restaurants consolidating recurring amenities and guest-area supply needs.', industry: 'hotels-hospitality', categoryId: 'home-decoration', location: 'Canggu, Bali', objective: 'Guest room amenities and service-area supplies', productId: 'prod-table-lamp', supplierId: 'seller-sari', targetBusinesses: 14, baseParticipants: 10, targetQuantity: 420, committedQuantity: 300, groupPrice: 1440000, minimumQuantity: 30, status: 'open', startTime: '2026-08-01T00:00:00.000Z', endTime: '2027-01-20T23:59:59.000Z', image: '/assets/product-1.jpeg', createdAt: now, updatedAt: now },
+    { id: 'pool-indonesian-artisan-furniture', title: 'Indonesian Artisan Furniture Pool', description: 'Design studios and hospitality buyers coordinating artisan furniture orders for better production pricing.', industry: 'retail-boutiques', categoryId: 'furniture', location: 'Yogyakarta, Indonesia', objective: 'Artisan tables and accent seating for commercial interiors', productId: 'prod-stone-table', supplierId: 'seller-sari', targetBusinesses: 9, baseParticipants: 5, targetQuantity: 135, committedQuantity: 75, groupPrice: 900000, minimumQuantity: 15, status: 'open', startTime: '2026-08-01T00:00:00.000Z', endTime: '2027-02-15T23:59:59.000Z', image: '/assets/featured-2.png', createdAt: now, updatedAt: now },
+    { id: 'pool-commercial-office-furniture', title: 'Commercial Office Furniture Pool', description: 'Small offices and coworking spaces grouping commercial furniture orders to reach supplier volume tiers.', industry: 'office-workspaces', categoryId: 'office-supplies', location: 'Jakarta, Indonesia', objective: 'Commercial office furniture and shared workspace fit-out', productId: 'prod-bamboo-table', supplierId: 'seller-sari', targetBusinesses: 8, baseParticipants: 4, targetQuantity: 96, committedQuantity: 48, groupPrice: 1125000, minimumQuantity: 12, status: 'open', startTime: '2026-08-01T00:00:00.000Z', endTime: '2027-03-01T23:59:59.000Z', image: '/assets/product-thumb.png', createdAt: now, updatedAt: now },
   ],
   buyingPoolParticipants: [],
   flashSales: [
@@ -95,6 +102,7 @@ export const seedData = {
   ],
   sellerApplications: [],
   sellerDocuments: [],
+  sellerFollows: [],
   sellerProfiles: [
     { id: 'seller-sari', userId: 'seller-demo-user', brandId: 'brand-sari-living', companyName: 'Sari Living', displayName: 'Sari Living', email: 'hello@sariliving.example', phone: '+62 361 555 0100', country: 'Indonesia', location: 'Bali, Indonesia', categories: ['furniture', 'home-decoration'], bio: 'Handcrafted furniture for hospitality and commercial spaces, made by Indonesian artisans with thoughtful materials and lasting techniques.', established: 2015, instagram: '@sariliving', impactTags: ['Heritage Craft', 'Eco Materials', 'Sustainable Design', 'Innovation', 'Women Led'], verificationStatus: 'approved', public: true, createdAt: now, updatedAt: now },
   ],
@@ -140,6 +148,7 @@ export const seedData = {
   ],
   supportTickets: [],
   feedbackSubmissions: [],
+  newsletterSubscriptions: [],
   accountSecurity: [],
   shippingAddresses: [],
   bankAccounts: [],
@@ -155,6 +164,7 @@ export const seedData = {
   ],
   savedCartItems: [],
   cartCoupons: [],
+  welcomeDiscounts: [],
   checkoutSessions: [],
   browsingHistory: [],
   affiliateProfiles: [],
@@ -180,6 +190,11 @@ export function createStore(filePath) {
       }
       if (Array.isArray(state.sellerPromotions) && !state.sellerPromotions.some((item) => item.id === 'promo-island-archive')) state.sellerPromotions.push(structuredClone(seedData.sellerPromotions.find((item) => item.id === 'promo-island-archive')))
       if (Array.isArray(state.auctions) && state.auctions.length === 0 && seedData.auctions.length) state.auctions = structuredClone(seedData.auctions)
+      if (state.aboutPage && !state.aboutPage.sustainability) state.aboutPage.sustainability = structuredClone(seedData.aboutPage.sustainability)
+      if (Array.isArray(state.buyingPools)) {
+        const existingPoolIds = new Set(state.buyingPools.map((item) => item.id))
+        state.buyingPools.push(...structuredClone(seedData.buyingPools.filter((item) => !existingPoolIds.has(item.id))))
+      }
     } catch (error) {
       if (error.code !== 'ENOENT') throw error
       state = structuredClone(seedData)

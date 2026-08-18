@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
+import AccountFooter from './AccountFooter'
 
 const money = (value, currency = 'IDR') => new Intl.NumberFormat('id-ID', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 const sold = (value) => new Intl.NumberFormat('en', { notation: value >= 1000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value)
 const api = async (url) => { const response = await fetch(url); const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message || 'Unable to load fast-selling products.'); return payload }
 
-function FastFooter() { return <footer className="account-footer fast-footer shell"><div className="logo">buyamia</div><p>Buy some comfort. Buy<br />some care.</p><div><small>SHOP</small><span>All Products</span><span>Furniture</span><span>Home Decor</span></div><div><small>ABOUT US</small><span>About Us</span><span>Sustainability</span><span>Sell on Buyamia</span></div><div><small>SUPPORT</small><span>Help Center</span><span>Contact Us</span><span>FAQ</span></div></footer> }
+function FastFooter() { return <AccountFooter className="fast-footer shell" /> }
 
 function FastCard({ product }) {
   return <article className="category-product-card fast-card"><a href={`/fast-selling/${product.id}`}><div><img src={product.image} alt={product.title} />{product.verificationBadge && <em>✓</em>}</div><h2>{product.title}</h2><small>{product.seller?.name || product.category?.name}</small><span>{product.originalPrice && <del>{money(product.originalPrice, product.currency)}</del>}<strong>{money(product.currentPrice, product.currency)}</strong></span><footer><b>{sold(product.soldCount)} sold</b><span>★ {product.rating}/5 · {product.reviewCount}</span></footer></a></article>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
-const supplierHeaders = { 'Content-Type': 'application/json', 'X-User-Id': 'seller-demo-user', 'X-User-Name': 'Sari Living' }
-async function api(url, options = {}) { const response = await fetch(url, options); const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message || 'Unable to create this category.'); return payload }
+const supplierHeaders = { 'Content-Type': 'application/json' }
+async function api(url, options = {}) { const response = await fetch(url, { credentials: 'include', ...(options || {}) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message || 'Unable to create this category.'); return payload }
 
 export default function CreateCategoryPage() {
   const [categories, setCategories] = useState([]); const [form, setForm] = useState({ name: '', description: '', parentCategoryId: '' }); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [message, setMessage] = useState('')

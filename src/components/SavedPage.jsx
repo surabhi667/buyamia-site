@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
+import AccountFooter from './AccountFooter'
 
 const money = (product) => new Intl.NumberFormat('en-US', { style: 'currency', currency: product.currency || 'IDR', maximumFractionDigits: 0 }).format(product.price || 0)
 
-function SavedFooter() { return <footer className="account-footer saved-footer shell"><div className="logo">buyamia</div><p>Buy some comfort. Buy<br />some care.</p><div><small>SHOP</small><span>All Products</span><span>Furniture</span><span>Home Decor</span></div><div><small>ABOUT US</small><span>About Us</span><span>Sustainability</span><span>Sell on Buyamia</span></div><div><small>SUPPORT</small><span>Help Center</span><span>Contact Us</span><span>FAQ</span></div></footer> }
+function SavedFooter() { return <AccountFooter className="saved-footer shell" /> }
 
 export default function SavedPage() {
   const [items, setItems] = useState([]); const [collections, setCollections] = useState([]); const [recommendations, setRecommendations] = useState([]); const [meta, setMeta] = useState({ page: 1, pages: 1, total: 0 }); const [filters, setFilters] = useState({ q: '', category: '', collection: '', sort: 'newest', page: 1 }); const [loading, setLoading] = useState(true); const [message, setMessage] = useState('')
-  async function api(url, options) { const response = await fetch(url, options); const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message || 'Unable to update your saved items.'); return payload }
+  async function api(url, options) { const response = await fetch(url, { credentials: 'include', ...(options || {}) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message || 'Unable to update your saved items.'); return payload }
   async function load(next = filters) { setLoading(true); setMessage(''); const query = new URLSearchParams({ page: String(next.page), limit: '12', sort: next.sort }); if (next.q) query.set('q', next.q); if (next.category) query.set('category', next.category); if (next.collection) query.set('collection', next.collection); try { const [saved, groups, recommended] = await Promise.all([api(`/api/saved?${query}`), api('/api/saved/collections'), api('/api/saved/recommendations')]); setItems(saved.data); setMeta(saved.meta); setCollections(groups.data); setRecommendations(recommended.data) } catch (error) { setMessage(error.message) } finally { setLoading(false) } }
   useEffect(() => { const timer = setTimeout(() => load(filters), filters.q ? 250 : 0); return () => clearTimeout(timer) }, [filters])
   function updateFilter(name, value) { setFilters((current) => ({ ...current, [name]: value, page: name === 'page' ? value : 1 })) }

@@ -46,8 +46,9 @@ test('node manifest reuses supplier catalog and Buying Pools without overstating
   assert.equal(response.status, 200)
   assert.equal(poolsResponse.status, 200)
   assert.deepEqual(manifest.offerings.map((item) => item.id), ['prod-accent-chair', 'prod-bamboo-table', 'prod-stone-table'])
-  assert.deepEqual(manifest.pool_participation.hosted_pools.map((item) => item.id), ['pool-bali-fitness', 'pool-hotel-lobby', 'pool-kemang-cleaning'])
-  assert.deepEqual(poolList.data.map((item) => item.id).sort(), ['pool-bali-fitness', 'pool-hotel-lobby', 'pool-kemang-cleaning'])
+  const expectedPoolIds = ['pool-commercial-office-furniture', 'pool-handmade-home-decor-wholesale', 'pool-hospitality-amenities', 'pool-indonesian-artisan-furniture', 'pool-sustainable-hotel-furniture']
+  assert.deepEqual(manifest.pool_participation.hosted_pools.map((item) => item.id), expectedPoolIds)
+  assert.deepEqual(poolList.data.map((item) => item.id).sort(), expectedPoolIds)
   assert.equal(manifest.capabilities.pools.hostable, true)
   assert.equal(manifest.capabilities.pools.joinable, false)
   assert.equal(manifest.capabilities['com.buyamia.pool_seat'].supported, false)

@@ -96,6 +96,9 @@ test('cart add persists a valid authenticated product with server pricing and MO
   assert.equal(payload.data.items[0].packSize, 10)
   assert.equal(payload.data.items[0].unitPrice, 1500000)
   assert.equal(payload.data.items[0].lineTotal, 1500000)
+  assert.equal(payload.data.summary.discount, 150000)
+  assert.equal(payload.data.summary.discountLabel, 'Welcome discount (10%)')
+  assert.equal(payload.data.summary.welcomeDiscount.eligible, true)
 })
 
 test('cart add rejects unauthenticated users', async (t) => {
@@ -143,7 +146,8 @@ test('cart add ignores forged client prices', async (t) => {
 
   assert.equal(response.status, 201)
   assert.equal(payload.data.items[0].unitPrice, 1500000)
-  assert.equal(payload.data.summary.total, 1850000)
+  assert.equal(payload.data.summary.discount, 150000)
+  assert.equal(payload.data.summary.total, 1700000)
 })
 
 test('cart add merges repeated products into one cart line', async (t) => {
@@ -203,5 +207,41 @@ test('cart add remains compatible with order creation', async (t) => {
   assert.equal(response.status, 201)
   assert.equal(payload.data.items.length, 1)
   assert.equal(payload.data.items[0].packSize, 10)
-  assert.equal(payload.data.total, 1850000)
+  assert.equal(payload.data.discount, 150000)
+  assert.equal(payload.data.total, 1700000)
+})
+
+test('welcome discount is calculated server-side in the cart summary', async (t) => {
+  const { request } = await withApi(t)
+  const { cookie } = await signup(request)
+  await addCartItem(request, cookie, { unitPrice: 1, discountPercent: 99 })
+
+  const { response, payload } = await request('/api/cart', { cookie })
+
+  assert.equal(response.status, 200)
+  assert.equal(payload.data.summary.subtotal, 1500000)
+  assert.equal(payload.data.summary.discount, 150000)
+  assert.deepEqual(payload.data.summary.discounts, [{
+    type: 'welcome-first-order',
+    id: payload.data.summary.discounts[0].id,
+    label: 'Welcome discount (10%)',
+    percent: 10,
+    amount: 150000,
+  }])
+  assert.equal(payload.data.summary.total, 1700000)
+})
+
+test('welcome discount refuses combination with another promotion', async (t) => {
+  const { request } = await withApi(t)
+  const { cookie } = await signup(request)
+  await addCartItem(request, cookie)
+
+  const { response, payload } = await request('/api/cart/coupon', {
+    method: 'POST',
+    cookie,
+    body: { code: 'BUYAMIA10' },
+  })
+
+  assert.equal(response.status, 409)
+  assert.equal(payload.error.code, 'PROMOTION_NOT_COMBINABLE')
 })
