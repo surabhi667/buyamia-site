@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import LogoutFeedbackModal from './LogoutFeedbackModal'
 
 const icons = {
   panel: '◧',
@@ -370,6 +371,8 @@ export function RightSidebar({ open, onToggle }) {
   const [authUser, setAuthUser] = useState(null)
   const [authModal, setAuthModal] = useState({ open: false, mode: 'login' })
   const [loggingOut, setLoggingOut] = useState(false)
+  const [logoutFeedbackOpen, setLogoutFeedbackOpen] = useState(false)
+  const logoutReturnFocus = useRef(null)
   const authReturnFocus = useRef(null)
   const [whatsapp, setWhatsapp] = useState({ url: '', error: '' })
   const [telegram, setTelegram] = useState({ status: 'loading', error: '' })
@@ -479,14 +482,41 @@ export function RightSidebar({ open, onToggle }) {
     closeAuthModal()
   }
 
+  function requestLogout(event) {
+    logoutReturnFocus.current = event.currentTarget
+    setLogoutFeedbackOpen(true)
+  }
+
+  function cancelLogout() {
+    setLogoutFeedbackOpen(false)
+    window.requestAnimationFrame(() => logoutReturnFocus.current?.focus())
+  }
+
   async function logout() {
     if (loggingOut) return
     setLoggingOut(true)
     try {
       await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
     } finally {
+      setLogoutFeedbackOpen(false)
       setAuthUser(null)
       setLoggingOut(false)
+    }
+  }
+
+  async function submitLogoutFeedback(feedback) {
+    if (loggingOut) return
+    setLoggingOut(true)
+    try {
+      await fetch('/api/feedback/logout', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(feedback) })
+    } catch {
+      // Feedback is optional and must never prevent logout.
+    } finally {
+      try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }) } finally {
+        setLogoutFeedbackOpen(false)
+        setAuthUser(null)
+        setLoggingOut(false)
+      }
     }
   }
 
@@ -535,10 +565,11 @@ export function RightSidebar({ open, onToggle }) {
         </section>
 
         <SidebarSection id="community" label="Community Chat" open={expanded.has('community')} onToggle={toggleSection} className="community-section">
-          <CommunityChat loggedIn={loggedIn} loggingOut={loggingOut} onLogin={(event) => openAuthModal('login', event)} onLogout={logout} onSignup={(event) => openAuthModal('signup', event)} />
+          <CommunityChat loggedIn={loggedIn} loggingOut={loggingOut} onLogin={(event) => openAuthModal('login', event)} onLogout={requestLogout} onSignup={(event) => openAuthModal('signup', event)} />
         </SidebarSection>
       </div>
       <AuthModal mode={authModal.mode} open={authModal.open} onAuthenticated={authenticated} onClose={closeAuthModal} onModeChange={(mode) => setAuthModal((current) => ({ ...current, mode }))} />
+      <LogoutFeedbackModal open={logoutFeedbackOpen} busy={loggingOut} onClose={cancelLogout} onSkip={logout} onSubmit={submitLogoutFeedback} />
     </aside>
   )
 }

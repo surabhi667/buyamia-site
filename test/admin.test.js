@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createApp } from '../server/app.js'
 import { createStore } from '../server/data.js'
+import { AuditAction, AuditStatus, createAuditService } from '../server/audit.js'
 
 async function withApi(testContext) {
   const directory = await mkdtemp(join(tmpdir(), 'buyamia-admin-'))
@@ -45,6 +46,11 @@ test('admin APIs reject unauthenticated and regular users', async (t) => {
   assert.equal(forbidden.response.status, 403)
   assert.equal(forbidden.payload.error.code, 'ADMIN_ACCESS_REQUIRED')
   assert.equal((await store.read('securityEvents')).at(-1).type, 'unauthorized_admin_access')
+  const denied = (await store.read('adminAuditLogs')).at(-1)
+  assert.equal(denied.action, AuditAction.PERMISSION_DENIED)
+  assert.equal(denied.actorId, regular.userId)
+  assert.equal(denied.actorRole, 'user')
+  assert.equal(denied.status, AuditStatus.DENIED)
 })
 
 test('authorized administrator can load dashboard without secrets', async (t) => {
@@ -82,7 +88,12 @@ test('supplier administration reuses supplier profiles and writes audit entries'
   const approved = await request(`/api/admin/suppliers/${created.payload.data.id}`, { method: 'PATCH', cookie: admin.cookie, body: { status: 'approved', reason: 'Business documents reviewed' } })
   assert.equal(approved.response.status, 200)
   assert.equal(approved.payload.data.public, true)
-  assert.deepEqual((await store.read('adminAuditLogs')).map((item) => item.action), ['supplier.create', 'supplier.approved'])
+  assert.deepEqual((await store.read('adminAuditLogs')).map((item) => item.action), [AuditAction.SUPPLIER_CREATED, AuditAction.SUPPLIER_VERIFIED])
+  const event = (await store.read('adminAuditLogs')).at(-1)
+  assert.equal(event.actorId, admin.userId)
+  assert.equal(event.resourceType, 'supplier')
+  assert.equal(event.resourceId, created.payload.data.id)
+  assert.deepEqual(event.metadata, { reason: 'Business documents reviewed', previousStatus: 'pending-review', newStatus: 'approved', public: true })
 })
 
 test('administrator approval converts a submitted seller application into a supplier profile', async (t) => {
@@ -115,7 +126,10 @@ test('refund workflow never claims provider execution and enforces eligible amou
   const excessive = await request('/api/admin/refunds', { method: 'POST', cookie: admin.cookie, body: { orderId: 'order-refundable-1001', amount: 1000001, reason: 'Attempt beyond remaining amount', confirmed: true } })
   assert.equal(excessive.response.status, 409)
   assert.equal(excessive.payload.error.code, 'REFUND_AMOUNT_EXCEEDED')
-  assert.equal((await store.read('adminAuditLogs')).at(-1).action, 'refund.request')
+  const auditEvent = (await store.read('adminAuditLogs')).at(-1)
+  assert.equal(auditEvent.action, AuditAction.REFUND_CREATED)
+  assert.equal(auditEvent.resourceType, 'refund')
+  assert.equal(auditEvent.resourceId, created.payload.data.id)
 })
 
 test('Amia administration exposes configuration status but never provider secrets', async (t) => {
@@ -127,5 +141,58 @@ test('Amia administration exposes configuration status but never provider secret
   assert.equal(status.response.status, 200)
   assert.equal(status.payload.data.provider.secretExposed, false)
   assert.equal('key' in status.payload.data.provider, false)
-  assert.equal((await store.read('adminAuditLogs')).at(-1).action, 'amia.configuration.update')
+  assert.equal((await store.read('adminAuditLogs')).at(-1).action, AuditAction.ADMIN_CONFIGURATION_UPDATED)
+})
+
+test('global audit endpoint rejects a supplier and records the denied permission', async (t) => {
+  const { request, store } = await withApi(t)
+  const supplier = await signup(request, 'audit-supplier@example.com')
+  await store.mutate((db) => { db.sellerProfiles.push({ id: 'audit-supplier', userId: supplier.userId, verificationStatus: 'approved', public: true, createdAt: new Date().toISOString() }) })
+  const result = await request('/api/admin/audit-log', { cookie: supplier.cookie })
+  assert.equal(result.response.status, 403)
+  const denied = (await store.read('adminAuditLogs')).at(-1)
+  assert.equal(denied.action, AuditAction.PERMISSION_DENIED)
+  assert.equal(denied.status, AuditStatus.DENIED)
+})
+
+test('authorized audit endpoint supports filters and bounded pagination', async (t) => {
+  const { request, store } = await withApi(t)
+  const admin = await signup(request, 'audit-filter-admin@example.com'); await makeAdmin(store, admin.userId)
+  const audit = createAuditService(store)
+  await audit.record({ actorId: admin.userId, actorRole: 'administrator', action: AuditAction.USER_SUSPENDED, resourceType: 'user', resourceId: 'user-one', status: AuditStatus.SUCCESS, metadata: { previousStatus: 'active', newStatus: 'suspended' } })
+  await audit.record({ actorId: admin.userId, actorRole: 'administrator', action: AuditAction.SUPPLIER_VERIFIED, resourceType: 'supplier', resourceId: 'supplier-one', status: AuditStatus.SUCCESS, metadata: { previousStatus: 'pending-review', newStatus: 'approved' } })
+  await audit.record({ actorId: 'other-admin', actorRole: 'administrator', action: AuditAction.SUPPLIER_REJECTED, resourceType: 'supplier', resourceId: 'supplier-two', status: AuditStatus.SUCCESS })
+
+  const filtered = await request(`/api/admin/audit-log?action=${AuditAction.SUPPLIER_VERIFIED}&actorId=${admin.userId}&resourceType=supplier&resourceId=supplier-one&status=SUCCESS&limit=10`, { cookie: admin.cookie })
+  assert.equal(filtered.response.status, 200)
+  assert.equal(filtered.payload.meta.total, 1)
+  assert.equal(filtered.payload.data[0].resourceId, 'supplier-one')
+  const paginated = await request('/api/admin/audit-log?page=2&limit=2', { cookie: admin.cookie })
+  assert.equal(paginated.response.status, 200)
+  assert.equal(paginated.payload.data.length, 1)
+  assert.deepEqual(paginated.payload.meta, { page: 2, limit: 2, total: 3, pages: 2 })
+})
+
+test('central audit service removes sensitive metadata recursively', async (t) => {
+  const { store } = await withApi(t)
+  const audit = createAuditService(store)
+  await audit.record({ actorId: 'admin-safe', actorRole: 'administrator', action: AuditAction.ADMIN_CONFIGURATION_UPDATED, resourceType: 'settings', resourceId: 'global', metadata: { reason: 'Safe reason', password: 'never-store', nested: { apiToken: 'never-store', allowed: true }, cardNumber: '4111111111111111' } })
+  const serialized = JSON.stringify((await store.read('adminAuditLogs'))[0])
+  assert.equal(serialized.includes('never-store'), false)
+  assert.equal(serialized.includes('4111111111111111'), false)
+  assert.equal(JSON.parse(serialized).metadata.nested.allowed, true)
+})
+
+test('login success and failure create privacy-safe audit events', async (t) => {
+  const { request, store } = await withApi(t)
+  const user = await signup(request, 'audit-login@example.com')
+  const failed = await request('/api/auth/login', { method: 'POST', body: { email: 'audit-login@example.com', password: 'WrongPassword123' } })
+  const succeeded = await request('/api/auth/login', { method: 'POST', body: { email: 'audit-login@example.com', password: 'StrongPassword123' } })
+  assert.equal(failed.response.status, 401)
+  assert.equal(succeeded.response.status, 200)
+  const events = await store.read('adminAuditLogs')
+  assert.deepEqual(events.map((item) => item.action), [AuditAction.LOGIN_FAILED, AuditAction.LOGIN_SUCCESS])
+  assert.equal(events.every((item) => item.actorId === user.userId), true)
+  assert.equal(JSON.stringify(events).includes('WrongPassword123'), false)
+  assert.equal(JSON.stringify(events).includes('audit-login@example.com'), false)
 })

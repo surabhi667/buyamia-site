@@ -132,7 +132,7 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
       let user = await userForRequest(request, services)
       let params
 
-      const privateAccountPath = pathname === '/api/preferences' || pathname.startsWith('/api/account') || pathname.startsWith('/api/saved') || pathname === '/api/notifications'
+      const privateAccountPath = pathname === '/api/preferences' || pathname.startsWith('/api/account') || pathname.startsWith('/api/saved') || pathname.startsWith('/api/notifications')
       const privateCartPath = pathname === '/api/cart' || pathname === '/api/cart/summary' || pathname === '/api/cart/coupon' || pathname === '/api/checkout' || pathname.startsWith('/api/cart/items')
       const privateCatalogPath = (pathname === '/api/categories' || pathname === '/api/marketplaces' || pathname === '/api/flash-sales') && request.method !== 'GET'
       const privateFlashSalePath = /^\/api\/flash-sales\/[^/]+$/.test(pathname) && ['PATCH', 'DELETE'].includes(request.method) || /^\/api\/flash-sales\/[^/]+\/publish$/.test(pathname)
@@ -146,7 +146,8 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
       const privateOrderAuxPath = /^\/api\/orders\/[^/]+\/(tracking|invoice)$/.test(pathname)
       const privateSellerFollowPath = /^\/api\/sellers\/[^/]+\/follow$/.test(pathname)
       const privateConciergePath = pathname === '/api/concierge/telegram/start' || pathname === '/api/concierge/telegram/connect' || pathname === '/api/concierge/telegram/disconnect' || pathname === '/api/concierge/telegram/history'
-      if (privateAccountPath || privateCartPath || privateCatalogPath || privateFlashSalePath || privateAuctionPath || privateSupportPath || privateSellerPath || privatePoolPath || privateAffiliatePath || privateCommunityPath || privateChatPath || privateOrderAuxPath || privateSellerFollowPath || privateConciergePath) user = await requireSessionUser(request, services)
+      const privateFeedbackPath = pathname === '/api/feedback/logout'
+      if (privateAccountPath || privateCartPath || privateCatalogPath || privateFlashSalePath || privateAuctionPath || privateSupportPath || privateSellerPath || privatePoolPath || privateAffiliatePath || privateCommunityPath || privateChatPath || privateOrderAuxPath || privateSellerFollowPath || privateConciergePath || privateFeedbackPath) user = await requireSessionUser(request, services)
 
       if (request.method === 'GET' && pathname === '/.well-known/buyamia-node') return json(response, 200, await services.nodeManifest.get(searchParams.get('supplier')), { ...corsHeaders, 'Cache-Control': 'public, max-age=3600' })
       if (request.method === 'GET' && pathname === '/api/health') return json(response, 200, { status: 'ok', service: 'buyamia-api', timestamp: new Date().toISOString() }, corsHeaders)
@@ -179,6 +180,7 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
         return logoutResponse(request, response, services, corsHeaders)
       }
       if (request.method === 'GET' && pathname === '/api/auth/session') return json(response, 200, { data: await services.auth.session(cookieValue(request, sessionCookieName)) }, corsHeaders)
+      if (request.method === 'POST' && pathname === '/api/feedback/logout') return json(response, 201, { data: await services.promoFeedback.submitLogout(await readJson(request), user) }, corsHeaders)
       if (request.method === 'POST' && pathname === '/api/feedback') return json(response, 201, { data: await services.promoFeedback.submit(await readJson(request), user) }, corsHeaders)
       if (request.method === 'POST' && pathname === '/api/newsletter') return json(response, 201, { data: await services.newsletter.subscribe(await readJson(request), user) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/concierge/whatsapp') return json(response, 200, { data: services.concierge.whatsapp(searchParams.get('message')) }, corsHeaders)
@@ -405,6 +407,10 @@ export function createApp(store, { allowedOrigin = 'http://127.0.0.1:5173' } = {
       if (request.method === 'GET' && pathname === '/api/account/affiliate') return json(response, 200, { data: await services.account.affiliateDashboard(user) }, corsHeaders)
       if (request.method === 'POST' && pathname === '/api/account/affiliate/link') return json(response, 200, { data: await services.account.affiliateProfile(user) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/notifications') return json(response, 200, await services.account.notifications(searchParams, user), corsHeaders)
+      if (request.method === 'GET' && pathname === '/api/notifications/unread-count') return json(response, 200, { data: await services.account.unreadNotifications(user) }, corsHeaders)
+      if (request.method === 'PATCH' && pathname === '/api/notifications/read-all') return json(response, 200, { data: await services.account.readAllNotifications(user) }, corsHeaders)
+      if ((params = match(pathname, /^\/api\/notifications\/([^/]+)\/read$/)) && request.method === 'PATCH') return json(response, 200, { data: await services.account.readNotification(params[0], user) }, corsHeaders)
+      if ((params = match(pathname, /^\/api\/notifications\/([^/]+)$/)) && request.method === 'GET') return json(response, 200, { data: await services.account.notification(params[0], user) }, corsHeaders)
       if (request.method === 'GET' && pathname === '/api/seller') return json(response, 200, { data: await services.seller.get(user) }, corsHeaders)
       if (request.method === 'POST' && pathname === '/api/seller/application') return json(response, 201, { data: await services.seller.create(await readJson(request), user) }, corsHeaders)
       if (request.method === 'PATCH' && pathname === '/api/seller/application') return json(response, 200, { data: await services.seller.update(await readJson(request), user) }, corsHeaders)

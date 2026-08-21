@@ -25,6 +25,35 @@
   -webkit-font-smoothing: antialiased;
 }
 
+.logout-feedback-backdrop { position: fixed; inset: 0; z-index: 1300; display: grid; place-items: center; padding: 20px; background: rgb(24 24 22 / 52%); }
+.logout-feedback-dialog { position: relative; width: min(100%, 520px); max-height: calc(100vh - 40px); overflow-y: auto; padding: 32px; border-radius: 18px; background: var(--cream, #f7f3e8); box-shadow: 0 24px 70px rgb(0 0 0 / 25%); color: var(--charcoal, #282824); }
+.logout-feedback-dialog h2 { margin: 0 36px 6px 0; font-size: clamp(1.7rem, 5vw, 2.25rem); }
+.logout-feedback-dialog > p { margin: 0 0 22px; color: #65645e; }
+.logout-feedback-close { position: absolute; top: 16px; right: 16px; width: 38px; height: 38px; border: 0; border-radius: 50%; background: transparent; font-size: 1.7rem; line-height: 1; cursor: pointer; }
+.logout-feedback-ratings { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
+.logout-feedback-ratings button { display: grid; gap: 4px; place-items: center; min-height: 78px; padding: 8px; border: 1px solid rgb(40 40 36 / 18%); border-radius: 12px; background: rgb(255 255 255 / 62%); color: inherit; cursor: pointer; }
+.logout-feedback-ratings button > span { font-size: 1.65rem; }
+.logout-feedback-ratings button.is-selected, .logout-feedback-reasons button.is-selected { border-color: var(--charcoal, #282824); background: var(--charcoal, #282824); color: white; }
+.logout-feedback-followup { margin-top: 22px; }
+.logout-feedback-followup > p { margin: 0 0 10px; font-weight: 700; }
+.logout-feedback-reasons { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
+.logout-feedback-reasons button { min-height: 36px; padding: 7px 11px; border: 1px solid rgb(40 40 36 / 18%); border-radius: 999px; background: rgb(255 255 255 / 62%); color: inherit; cursor: pointer; }
+.logout-feedback-followup textarea { box-sizing: border-box; width: 100%; min-height: 82px; resize: vertical; padding: 11px 13px; border: 1px solid rgb(40 40 36 / 22%); border-radius: 10px; background: white; color: inherit; font: inherit; }
+.logout-feedback-count { display: block; margin-top: 3px; text-align: right; color: #77756d; }
+.logout-feedback-actions { display: flex; align-items: center; gap: 12px; margin-top: 22px; }
+.logout-feedback-actions .btn { flex: 1; min-height: 44px; }
+.logout-feedback-skip { min-height: 44px; padding: 8px 4px; border: 0; background: transparent; color: inherit; text-decoration: underline; cursor: pointer; }
+.logout-feedback-dialog button:focus-visible, .logout-feedback-dialog textarea:focus-visible { outline: 3px solid #5296ee; outline-offset: 2px; }
+.logout-feedback-dialog button:disabled { cursor: wait; opacity: .65; }
+
+@media (max-width: 560px) {
+  .logout-feedback-backdrop { align-items: end; padding: 12px; }
+  .logout-feedback-dialog { max-height: calc(100vh - 24px); padding: 26px 18px 20px; border-radius: 16px; }
+  .logout-feedback-ratings { gap: 6px; }
+  .logout-feedback-ratings button { min-height: 72px; padding-inline: 4px; }
+  .logout-feedback-actions { align-items: stretch; flex-direction: column; }
+}
+
 * {
   box-sizing: border-box;
 }

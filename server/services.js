@@ -2,6 +2,8 @@ import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { buildNodeManifest } from './node-manifest.js'
 import { createAdminService } from './admin.js'
+import { AuditAction, AuditStatus, createAuditService } from './audit.js'
+import { NotificationType, createNotificationService } from './notifications.js'
 
 const scryptAsync = promisify(scrypt)
 
@@ -144,6 +146,8 @@ function relevance(query, fields) {
 
 export function createServices(store, environment = process.env) {
   const administratorEmails = new Set(String(environment.BUYAMIA_ADMIN_EMAILS || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean))
+  const audit = createAuditService(store)
+  const notificationService = createNotificationService(store, { ApiError, paginate })
   function newAuthSession(timestamp, requestMeta = {}) {
     const token = randomBytes(32).toString('base64url')
     const expiresAt = new Date(Date.now() + authSessionTtlMs).toISOString()
@@ -214,11 +218,11 @@ export function createServices(store, environment = process.env) {
       const security = account ? (await store.read('accountSecurity')).find((item) => item.userId === account.userId) : null
       const matches = await passwordMatches(password, security?.passwordHash || dummyPasswordHash)
       if (!account || !security?.passwordHash || !matches) {
-        await store.mutate((db) => { db.securityEvents.push({ id: store.id('security'), type: 'failed_login', severity: 'medium', identifier: `${email.slice(0, 3)}***@${email.split('@')[1]}`, createdAt: new Date().toISOString() }) })
+        await store.mutate((db) => { db.securityEvents.push({ id: store.id('security'), type: 'failed_login', severity: 'medium', identifier: `${email.slice(0, 3)}***@${email.split('@')[1]}`, createdAt: new Date().toISOString() }); audit.recordInTransaction(db, { actorId: account?.userId || null, actorRole: account?.role || null, action: AuditAction.LOGIN_FAILED, resourceType: 'session', resourceId: null, status: AuditStatus.FAILED, metadata: { reason: 'invalid_credentials' } }) })
         throw invalidCredentials()
       }
       if (account.status === 'suspended') {
-        await store.mutate((db) => { db.securityEvents.push({ id: store.id('security'), type: 'suspended_account_login', severity: 'high', userId: account.userId, createdAt: new Date().toISOString() }) })
+        await store.mutate((db) => { db.securityEvents.push({ id: store.id('security'), type: 'suspended_account_login', severity: 'high', userId: account.userId, createdAt: new Date().toISOString() }); audit.recordInTransaction(db, { actorId: account.userId, actorRole: account.role, action: AuditAction.LOGIN_FAILED, resourceType: 'session', resourceId: null, status: AuditStatus.DENIED, metadata: { reason: 'account_suspended' } }) })
         throw new ApiError(403, 'ACCOUNT_SUSPENDED', 'This account is suspended')
       }
       return store.mutate((db) => {
@@ -230,6 +234,7 @@ export function createServices(store, environment = process.env) {
         currentSecurity.activeSessions = [...(currentSecurity.activeSessions || []).filter((item) => !item.expiresAt || new Date(item.expiresAt) > new Date(timestamp)), session]
         currentSecurity.loginHistory = [...(currentSecurity.loginHistory || []), { id: store.id('login'), status: 'success', createdAt: timestamp }]
         currentSecurity.updatedAt = timestamp
+        audit.recordInTransaction(db, { actorId: currentAccount.userId, actorRole: currentAccount.role, action: AuditAction.LOGIN_SUCCESS, resourceType: 'session', resourceId: session.id, status: AuditStatus.SUCCESS })
         return { user: publicUser(currentAccount), session: publicSession(session), sessionToken: token, sessionExpiresAt: session.expiresAt }
       })
     },
@@ -506,7 +511,7 @@ export function createServices(store, environment = process.env) {
     async industries() { return [{ id: 'restaurants-cafes', name: 'Restaurants & Cafés' }, { id: 'bars-nightlife', name: 'Bars & Nightlife' }, { id: 'hotels-hospitality', name: 'Hotels & Hospitality' }, { id: 'gyms-fitness', name: 'Gyms & Fitness Studios' }, { id: 'clinics-healthcare', name: 'Clinics & Healthcare' }, { id: 'salons-spas', name: 'Salons & Spas' }, { id: 'retail-boutiques', name: 'Retail & Boutiques' }, { id: 'office-workspaces', name: 'Office Workspaces' }] },
     async join(id, user) {
       if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to join a Buying Pool')
-      return store.mutate((db) => { const pool = db.buyingPools.find((item) => item.id === id); if (!pool) throw new ApiError(404, 'BUYING_POOL_NOT_FOUND', 'Buying Pool not found'); const count = pool.baseParticipants + db.buyingPoolParticipants.filter((item) => item.poolId === id).length; const status = buyingPoolStatus(pool, count); if (!['open', 'almost-full'].includes(status)) throw new ApiError(409, 'BUYING_POOL_CLOSED', 'This Buying Pool is no longer accepting participants'); if (db.buyingPoolParticipants.some((item) => item.poolId === id && item.userId === user.id)) throw new ApiError(409, 'ALREADY_JOINED', 'You have already joined this Buying Pool'); const participation = { id: store.id('pool-participant'), poolId: id, userId: user.id, joinedAt: new Date().toISOString() }; db.buyingPoolParticipants.push(participation); return participation })
+      return store.mutate((db) => { const pool = db.buyingPools.find((item) => item.id === id); if (!pool) throw new ApiError(404, 'BUYING_POOL_NOT_FOUND', 'Buying Pool not found'); const count = pool.baseParticipants + db.buyingPoolParticipants.filter((item) => item.poolId === id).length; const status = buyingPoolStatus(pool, count); if (!['open', 'almost-full'].includes(status)) throw new ApiError(409, 'BUYING_POOL_CLOSED', 'This Buying Pool is no longer accepting participants'); if (db.buyingPoolParticipants.some((item) => item.poolId === id && item.userId === user.id)) throw new ApiError(409, 'ALREADY_JOINED', 'You have already joined this Buying Pool'); const participation = { id: store.id('pool-participant'), poolId: id, userId: user.id, joinedAt: new Date().toISOString() }; db.buyingPoolParticipants.push(participation); notificationService.publishInTransaction(db, { recipientIds: [user.id], type: NotificationType.BUYING_POOL_JOINED, payload: { poolId: pool.id, poolTitle: pool.title } }); return participation })
     },
     async create(body, user) {
       if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to start a Buying Pool')
@@ -882,8 +887,9 @@ export function createServices(store, environment = process.env) {
     },
     async preferences(user) { return (await store.read('userPreferences')).find((item) => item.userId === user.id) || { userId: user.id, currency: 'IDR', location: 'Bali, Indonesia', sidebar: { leftOpen: false, rightOpen: false } } },
     async updatePreferences(body, user) {
-      const allowed = ['currency', 'location', 'sidebar']
+      const allowed = ['currency', 'location', 'sidebar', 'notifications']
       const update = Object.fromEntries(Object.entries(body).filter(([key]) => allowed.includes(key)))
+      if (update.notifications !== undefined && (!update.notifications || typeof update.notifications !== 'object' || Array.isArray(update.notifications) || Object.keys(update.notifications).some((key) => key !== 'inApp') || (update.notifications.inApp !== undefined && typeof update.notifications.inApp !== 'boolean'))) throw new ApiError(400, 'VALIDATION_ERROR', 'notifications must contain only an optional boolean inApp setting')
       return store.mutate((db) => {
         let preferences = db.userPreferences.find((item) => item.userId === user.id)
         if (!preferences) { preferences = { userId: user.id }; db.userPreferences.push(preferences) }
@@ -891,7 +897,11 @@ export function createServices(store, environment = process.env) {
         return preferences
       })
     },
-    async notifications(query, user) { return paginate([...await store.read('notifications')].filter((item) => item.userId === user.id).sort(newestFirst), query) },
+    async notifications(query, user) { return notificationService.list(query, user) },
+    async notification(id, user) { return notificationService.get(id, user) },
+    async unreadNotifications(user) { return notificationService.unreadCount(user) },
+    async readNotification(id, user) { return notificationService.markRead(id, user) },
+    async readAllNotifications(user) { return notificationService.markAllRead(user) },
     async security(user) { const security = (await store.read('accountSecurity')).find((item) => item.userId === user.id); return publicSecurity(security || newSecurity(user), user.sessionId) },
     async updateSecurity(body, user) {
       if (body.twoFactorEnabled !== undefined && typeof body.twoFactorEnabled !== 'boolean') throw new ApiError(400, 'VALIDATION_ERROR', 'twoFactorEnabled must be a boolean')
@@ -1321,6 +1331,7 @@ export function createServices(store, environment = process.env) {
         }
         const consumedWelcomeDiscount = activeWelcomeDiscount(db, user)
         db.orders.push(order)
+        notificationService.publishInTransaction(db, { recipientIds: [user.id], type: NotificationType.ORDER_CONFIRMED, payload: { orderId: order.id, orderNumber: order.orderNumber } })
         if (consumedWelcomeDiscount && cartData.summary.discounts.some((item) => item.type === welcomeDiscountType)) {
           consumedWelcomeDiscount.status = 'used'
           consumedWelcomeDiscount.usedAt = timestamp
@@ -1376,7 +1387,7 @@ export function createServices(store, environment = process.env) {
       const current = await this.get(user); if (!current) throw new ApiError(404, 'SELLER_APPLICATION_NOT_FOUND', 'Seller application not found'); if (current.status !== 'draft' && current.status !== 'rejected') throw new ApiError(409, 'APPLICATION_ALREADY_SUBMITTED', 'This application has already been submitted')
       sellerApplicationInput(current, { submitting: true })
       const documents = (await store.read('sellerDocuments')).filter((item) => item.userId === user.id); if (!documents.length) throw new ApiError(400, 'DOCUMENT_REQUIRED', 'Upload at least one business verification document')
-      return store.mutate((db) => { const application = db.sellerApplications.find((item) => item.id === current.id); const timestamp = new Date().toISOString(); Object.assign(application, { status: 'submitted', verificationStatus: 'pending-review', submittedAt: timestamp, updatedAt: timestamp }); return application })
+      return store.mutate((db) => { const application = db.sellerApplications.find((item) => item.id === current.id); const timestamp = new Date().toISOString(); Object.assign(application, { status: 'submitted', verificationStatus: 'pending-review', submittedAt: timestamp, updatedAt: timestamp }); const administrators = db.accounts.filter((account) => account.role === 'administrator').map((account) => account.userId); notificationService.publishInTransaction(db, { recipientIds: administrators, type: NotificationType.SUPPLIER_REVIEW_REQUIRED, priority: 'HIGH', payload: { applicationId: application.id } }); return application })
     },
     async status(user) { const application = await this.get(user); return application ? { applicationId: application.id, status: application.status, verificationStatus: application.verificationStatus, submittedAt: application.submittedAt, updatedAt: application.updatedAt } : { status: 'not-started', verificationStatus: 'not-submitted' } },
     async documents(user) { return (await store.read('sellerDocuments')).filter((item) => item.userId === user.id).sort(newestFirst) },
@@ -1434,7 +1445,8 @@ export function createServices(store, environment = process.env) {
         if (status !== 'live') throw new ApiError(409, 'AUCTION_CLOSED', 'This auction is closed')
         const seller = db.sellerProfiles.find((item) => item.id === auction.sellerId)
         if (seller?.userId === user.id) throw new ApiError(403, 'SELLER_CANNOT_BID', 'Sellers cannot bid on their own auctions')
-        const highest = db.auctionBids.filter((item) => item.auctionId === id).reduce((max, item) => Math.max(max, item.amount), auction.currentBid || auction.startingPrice)
+        const previousHighestBid = db.auctionBids.filter((item) => item.auctionId === id).sort((a, b) => b.amount - a.amount)[0] || null
+        const highest = previousHighestBid?.amount || auction.currentBid || auction.startingPrice
         const minimum = highest + (auction.bidIncrement || 1)
         if (amount < minimum) throw new ApiError(409, 'BID_TOO_LOW', `Bid must be at least ${minimum}`)
         const bid = { id: store.id('bid'), auctionId: id, userId: user.id, idempotencyKey, amount, createdAt: new Date().toISOString() }
@@ -1442,6 +1454,7 @@ export function createServices(store, environment = process.env) {
         auction.currentBid = amount
         auction.bidCount = (auction.bidCount || 0) + 1
         auction.updatedAt = bid.createdAt
+        if (previousHighestBid && previousHighestBid.userId !== user.id) notificationService.publishInTransaction(db, { recipientIds: [previousHighestBid.userId], type: NotificationType.AUCTION_OUTBID, payload: { auctionId: auction.id, auctionTitle: auction.title } })
         return { bid, created: true }
       })
       return { ...result, auction: await this.get(id, user) }
@@ -1572,6 +1585,21 @@ export function createServices(store, environment = process.env) {
         return { id: submission.id, status: submission.status, reward: { type: 'percentage', value: 10, appliesTo: 'next-purchase' } }
       })
     },
+    async submitLogout(body, user) {
+      if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to submit logout feedback')
+      const ratings = new Set(['BAD', 'OKAY', 'GOOD', 'GREAT'])
+      const allowedReasons = new Set(['EASY_TO_USE', 'GOOD_PRODUCTS', 'USEFUL_FEATURES', 'FAST_EXPERIENCE', 'HARD_TO_NAVIGATE', 'COULD_NOT_FIND', 'TECHNICAL_ISSUE', 'OTHER'])
+      if (typeof body.rating !== 'string' || !ratings.has(body.rating)) throw new ApiError(400, 'VALIDATION_ERROR', 'rating must be BAD, OKAY, GOOD, or GREAT')
+      if (body.reasons !== undefined && (!Array.isArray(body.reasons) || body.reasons.some((reason) => typeof reason !== 'string' || !allowedReasons.has(reason)))) throw new ApiError(400, 'VALIDATION_ERROR', 'reasons contains an unsupported value')
+      const reasons = [...new Set(body.reasons || [])]
+      if (reasons.length > 4) throw new ApiError(400, 'VALIDATION_ERROR', 'reasons must contain at most 4 values')
+      const comment = text(body.comment, 'comment', { max: 500, required: false }) || null
+      return store.mutate((db) => {
+        const submission = { id: store.id('feedback'), userId: user.id, rating: body.rating, reasons, comment, source: 'LOGOUT_SURVEY', status: 'received', createdAt: new Date().toISOString() }
+        db.feedbackSubmissions.push(submission)
+        return { id: submission.id, status: submission.status }
+      })
+    },
   }
 
   const newsletter = {
@@ -1603,7 +1631,7 @@ export function createServices(store, environment = process.env) {
     },
   }
 
-  const admin = createAdminService(store, environment, { ApiError, text, paginate })
+  const admin = createAdminService(store, environment, { ApiError, text, paginate, audit, notificationService })
 
   return { auth, about, categories, products, marketplace, buyingPools, flashSales, fastSelling, sellerPromotions, brands, source, search, community, chat, account, affiliate, support, cart, checkout, orders, seller, auctions, auctionListings, concierge, promoFeedback, newsletter, nodeManifest, admin }
 }

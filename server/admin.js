@@ -1,23 +1,27 @@
+import { AuditAction, AuditStatus } from './audit.js'
+import { NotificationType } from './notifications.js'
+
 function newestFirst(a, b) { return new Date(b.createdAt || b.updatedAt || 0) - new Date(a.createdAt || a.updatedAt || 0) }
 function normalize(value) { return String(value || '').trim().toLowerCase() }
 
-export function createAdminService(store, environment, { ApiError, text, paginate }) {
+export function createAdminService(store, environment, { ApiError, text, paginate, audit, notificationService }) {
   const configuredAdmins = () => new Set(String(environment.BUYAMIA_ADMIN_EMAILS || '').split(',').map(normalize).filter(Boolean))
 
   async function requireAdmin(user) {
     if (!user?.authenticated) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Administrator authentication required')
     const account = (await store.read('accounts')).find((item) => item.userId === user.id)
     if (!account || (account.role !== 'administrator' && !configuredAdmins().has(normalize(account.email)))) {
-      await store.mutate((db) => { db.securityEvents.push({ id: store.id('security'), type: 'unauthorized_admin_access', severity: 'high', userId: user.id, createdAt: new Date().toISOString() }) })
+      await store.mutate((db) => {
+        db.securityEvents.push({ id: store.id('security'), type: 'unauthorized_admin_access', severity: 'high', userId: user.id, createdAt: new Date().toISOString() })
+        audit.recordInTransaction(db, { actorId: user.id, actorRole: account?.role || user.role || 'unknown', action: AuditAction.PERMISSION_DENIED, resourceType: 'admin-api', resourceId: null, status: AuditStatus.DENIED, metadata: { requiredRole: 'administrator' } })
+      })
       throw new ApiError(403, 'ADMIN_ACCESS_REQUIRED', 'Administrator access required')
     }
     return account
   }
 
-  function audit(db, admin, action, targetType, targetId, details = {}) {
-    const entry = { id: store.id('audit'), administratorId: admin.userId, administratorEmail: admin.email, action, targetType, targetId, result: 'success', ...details, createdAt: new Date().toISOString() }
-    db.adminAuditLogs.push(entry)
-    return entry
+  function record(db, admin, action, resourceType, resourceId, metadata = {}) {
+    return audit.recordInTransaction(db, { actorId: admin.userId, actorRole: admin.role || 'administrator', actorEmail: admin.email, action, resourceType, resourceId, status: AuditStatus.SUCCESS, metadata })
   }
 
   function publicAccount(account, supplierIds) {
@@ -77,7 +81,7 @@ export function createAdminService(store, environment, { ApiError, text, paginat
       const admin = await requireAdmin(user); const status = text(body.status, 'status', { max: 20 }); const reason = text(body.reason, 'reason', { min: 5, max: 500 })
       if (!['active', 'suspended'].includes(status)) throw new ApiError(400, 'VALIDATION_ERROR', 'status must be active or suspended')
       if (id === admin.userId && status === 'suspended') throw new ApiError(409, 'SELF_SUSPENSION_NOT_ALLOWED', 'Administrators cannot suspend their own account')
-      return store.mutate((db) => { const account = db.accounts.find((item) => item.userId === id); if (!account) throw new ApiError(404, 'USER_NOT_FOUND', 'User not found'); const previousState = { status: account.status || 'active' }; account.status = status; account.updatedAt = new Date().toISOString(); if (status === 'suspended') { const security = db.accountSecurity.find((item) => item.userId === id); if (security) security.activeSessions = [] }; audit(db, admin, status === 'suspended' ? 'user.suspend' : 'user.restore', 'user', id, { reason, previousState, resultingState: { status } }); return { userId: account.userId, status: account.status } })
+      return store.mutate((db) => { const account = db.accounts.find((item) => item.userId === id); if (!account) throw new ApiError(404, 'USER_NOT_FOUND', 'User not found'); const previousStatus = account.status || 'active'; account.status = status; account.updatedAt = new Date().toISOString(); if (status === 'suspended') { const security = db.accountSecurity.find((item) => item.userId === id); if (security) security.activeSessions = [] }; record(db, admin, status === 'suspended' ? AuditAction.USER_SUSPENDED : AuditAction.USER_RESTORED, 'user', id, { reason, previousStatus, newStatus: status }); return { userId: account.userId, status: account.status } })
     },
 
     async suppliers(query, user) {
@@ -95,7 +99,7 @@ export function createAdminService(store, environment, { ApiError, text, paginat
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiError(400, 'VALIDATION_ERROR', 'email must be a valid email address')
       if (!/^\+?[0-9 ()-]{7,24}$/.test(phone)) throw new ApiError(400, 'VALIDATION_ERROR', 'phone must be a valid phone number')
       if (!['pending-review', 'approved'].includes(verificationStatus)) throw new ApiError(400, 'VALIDATION_ERROR', 'verificationStatus must be pending-review or approved')
-      return store.mutate((db) => { if (!db.categories.some((item) => item.id === categoryId && item.active)) throw new ApiError(400, 'VALIDATION_ERROR', 'categoryId must identify an active category'); if (db.sellerProfiles.some((item) => normalize(item.email) === email)) throw new ApiError(409, 'SUPPLIER_EXISTS', 'A supplier with this email already exists'); const timestamp = new Date().toISOString(); const supplier = { id: store.id('seller'), userId: null, brandId: null, companyName, displayName: companyName, contactName, email, phone, country, location: country, categories: [categoryId], website, bio: '', verificationStatus, public: verificationStatus === 'approved', manuallyCreated: true, createdBy: admin.userId, createdAt: timestamp, updatedAt: timestamp }; db.sellerProfiles.push(supplier); audit(db, admin, 'supplier.create', 'supplier', supplier.id, { reason: text(body.reason || 'Manual supplier onboarding', 'reason', { min: 5, max: 500 }), resultingState: { verificationStatus } }); return supplier })
+      return store.mutate((db) => { if (!db.categories.some((item) => item.id === categoryId && item.active)) throw new ApiError(400, 'VALIDATION_ERROR', 'categoryId must identify an active category'); if (db.sellerProfiles.some((item) => normalize(item.email) === email)) throw new ApiError(409, 'SUPPLIER_EXISTS', 'A supplier with this email already exists'); const timestamp = new Date().toISOString(); const supplier = { id: store.id('seller'), userId: null, brandId: null, companyName, displayName: companyName, contactName, email, phone, country, location: country, categories: [categoryId], website, bio: '', verificationStatus, public: verificationStatus === 'approved', manuallyCreated: true, createdBy: admin.userId, createdAt: timestamp, updatedAt: timestamp }; db.sellerProfiles.push(supplier); record(db, admin, AuditAction.SUPPLIER_CREATED, 'supplier', supplier.id, { reason: text(body.reason || 'Manual supplier onboarding', 'reason', { min: 5, max: 500 }), newStatus: verificationStatus }); return supplier })
     },
 
     async updateSupplier(id, body, user) {
@@ -103,7 +107,7 @@ export function createAdminService(store, environment, { ApiError, text, paginat
       if (!['approved', 'rejected', 'suspended', 'pending-review'].includes(status)) throw new ApiError(400, 'VALIDATION_ERROR', 'Unsupported supplier status')
       return store.mutate((db) => {
         const timestamp = new Date().toISOString(); const supplier = db.sellerProfiles.find((item) => item.id === id)
-        if (supplier) { const previousState = { verificationStatus: supplier.verificationStatus, public: supplier.public }; supplier.verificationStatus = status; supplier.public = status === 'approved'; supplier.updatedAt = timestamp; audit(db, admin, `supplier.${status}`, 'supplier', id, { reason, previousState, resultingState: { verificationStatus: status, public: supplier.public } }); return { ...supplier, recordType: 'profile' } }
+        if (supplier) { const previousStatus = supplier.verificationStatus; supplier.verificationStatus = status; supplier.public = status === 'approved'; supplier.updatedAt = timestamp; const action = status === 'approved' ? AuditAction.SUPPLIER_VERIFIED : status === 'rejected' ? AuditAction.SUPPLIER_REJECTED : AuditAction.SUPPLIER_STATUS_CHANGED; record(db, admin, action, 'supplier', id, { reason, previousStatus, newStatus: status, public: supplier.public }); if (supplier.userId) notificationService.publishInTransaction(db, { recipientIds: [supplier.userId], type: status === 'approved' ? NotificationType.SUPPLIER_VERIFIED : status === 'rejected' ? NotificationType.SUPPLIER_REJECTED : NotificationType.SUPPLIER_STATUS_CHANGED, payload: { supplierId: supplier.id, status } }); return { ...supplier, recordType: 'profile' } }
         const application = db.sellerApplications.find((item) => item.id === id)
         if (!application) throw new ApiError(404, 'SUPPLIER_NOT_FOUND', 'Supplier or supplier application not found')
         if (!['approved', 'rejected', 'pending-review'].includes(status)) throw new ApiError(400, 'VALIDATION_ERROR', 'Supplier applications cannot be suspended before approval')
@@ -114,7 +118,9 @@ export function createAdminService(store, environment, { ApiError, text, paginat
         application.reviewedAt = timestamp; application.reviewedBy = admin.userId; application.reviewReason = reason; application.updatedAt = timestamp
         let profile = db.sellerProfiles.find((item) => item.userId === application.userId)
         if (status === 'approved' && !profile) { profile = { id: store.id('seller'), userId: application.userId, brandId: null, companyName: application.companyName, displayName: application.brandName || application.companyName, contactName: application.legalName, email: application.email, phone: application.phone, country: application.country, location: application.country, categories: application.categories, website: null, bio: '', verificationStatus: 'approved', public: true, createdAt: timestamp, updatedAt: timestamp }; db.sellerProfiles.push(profile) }
-        audit(db, admin, `supplier.application.${status}`, 'seller-application', id, { reason, previousState, resultingState: { status: application.status, verificationStatus: application.verificationStatus, supplierId: profile?.id || null } })
+        const action = status === 'approved' ? AuditAction.SUPPLIER_VERIFIED : status === 'rejected' ? AuditAction.SUPPLIER_REJECTED : AuditAction.SUPPLIER_STATUS_CHANGED
+        record(db, admin, action, 'seller-application', id, { reason, previousStatus: previousState.verificationStatus, newStatus: application.verificationStatus, supplierId: profile?.id || null })
+        notificationService.publishInTransaction(db, { recipientIds: [application.userId], type: status === 'approved' ? NotificationType.SUPPLIER_VERIFIED : status === 'rejected' ? NotificationType.SUPPLIER_REJECTED : NotificationType.SUPPLIER_STATUS_CHANGED, payload: { applicationId: application.id, supplierId: profile?.id || null, status } })
         return profile ? { ...profile, recordType: 'profile' } : { ...application, displayName: application.brandName || application.companyName, recordType: 'application' }
       })
     },
@@ -129,7 +135,7 @@ export function createAdminService(store, environment, { ApiError, text, paginat
       const admin = await requireAdmin(user); const orderId = text(body.orderId, 'orderId', { max: 160 }); const reason = text(body.reason, 'reason', { min: 10, max: 1000 }); const amount = Number(body.amount)
       if (body.confirmed !== true) throw new ApiError(400, 'CONFIRMATION_REQUIRED', 'Refund confirmation is required')
       if (!Number.isSafeInteger(amount) || amount < 1) throw new ApiError(400, 'VALIDATION_ERROR', 'amount must be a positive whole number')
-      return store.mutate((db) => { const order = db.orders.find((item) => item.id === orderId); if (!order) throw new ApiError(404, 'ORDER_NOT_FOUND', 'Order not found'); if (!['paid', 'completed'].includes(order.payment?.status)) throw new ApiError(409, 'ORDER_NOT_REFUNDABLE', 'The order payment is not eligible for a refund'); const alreadyRequested = db.adminRefunds.filter((item) => item.orderId === orderId && item.status !== 'rejected').reduce((sum, item) => sum + item.amount, 0); const eligible = order.total - alreadyRequested; if (amount > eligible) throw new ApiError(409, 'REFUND_AMOUNT_EXCEEDED', `Refund amount cannot exceed ${eligible}`); const timestamp = new Date().toISOString(); const refund = { id: store.id('refund'), orderId, orderNumber: order.orderNumber, amount, currency: order.currency || 'IDR', reason, administratorId: admin.userId, status: 'payment_provider_not_configured', providerExecuted: false, createdAt: timestamp, updatedAt: timestamp }; db.adminRefunds.push(refund); audit(db, admin, 'refund.request', 'order', orderId, { reason, resultingState: { refundId: refund.id, amount, status: refund.status } }); return refund })
+      return store.mutate((db) => { const order = db.orders.find((item) => item.id === orderId); if (!order) throw new ApiError(404, 'ORDER_NOT_FOUND', 'Order not found'); if (!['paid', 'completed'].includes(order.payment?.status)) throw new ApiError(409, 'ORDER_NOT_REFUNDABLE', 'The order payment is not eligible for a refund'); const alreadyRequested = db.adminRefunds.filter((item) => item.orderId === orderId && item.status !== 'rejected').reduce((sum, item) => sum + item.amount, 0); const eligible = order.total - alreadyRequested; if (amount > eligible) throw new ApiError(409, 'REFUND_AMOUNT_EXCEEDED', `Refund amount cannot exceed ${eligible}`); const timestamp = new Date().toISOString(); const refund = { id: store.id('refund'), orderId, orderNumber: order.orderNumber, amount, currency: order.currency || 'IDR', reason, administratorId: admin.userId, status: 'payment_provider_not_configured', providerExecuted: false, createdAt: timestamp, updatedAt: timestamp }; db.adminRefunds.push(refund); record(db, admin, AuditAction.REFUND_CREATED, 'refund', refund.id, { reason, orderId, amount, currency: refund.currency, newStatus: refund.status }); notificationService.publishInTransaction(db, { recipientIds: [order.userId], type: NotificationType.REFUND_REQUESTED, payload: { refundId: refund.id, orderId: order.id, orderNumber: order.orderNumber } }); return refund })
     },
 
     async amia(user) {
@@ -139,9 +145,22 @@ export function createAdminService(store, environment, { ApiError, text, paginat
 
     async updateAmia(body, user) {
       const admin = await requireAdmin(user); if (typeof body.enabled !== 'boolean') throw new ApiError(400, 'VALIDATION_ERROR', 'enabled must be a boolean'); const moderation = text(body.moderation, 'moderation', { max: 20 }); if (!['standard', 'strict'].includes(moderation)) throw new ApiError(400, 'VALIDATION_ERROR', 'moderation must be standard or strict'); const allowed = new Set(['products', 'suppliers', 'services', 'categories', 'auctions', 'flash-sales']); if (!Array.isArray(body.capabilities) || body.capabilities.some((item) => !allowed.has(item))) throw new ApiError(400, 'VALIDATION_ERROR', 'capabilities contains an unsupported value')
-      return store.mutate((db) => { const previousState = structuredClone(db.adminSettings.amia); db.adminSettings.amia = { enabled: body.enabled, moderation, capabilities: [...new Set(body.capabilities)], updatedAt: new Date().toISOString(), updatedBy: admin.userId }; audit(db, admin, 'amia.configuration.update', 'amia', 'global', { reason: text(body.reason, 'reason', { min: 5, max: 500 }), previousState, resultingState: db.adminSettings.amia }); return db.adminSettings.amia })
+      return store.mutate((db) => { const previousState = structuredClone(db.adminSettings.amia); db.adminSettings.amia = { enabled: body.enabled, moderation, capabilities: [...new Set(body.capabilities)], updatedAt: new Date().toISOString(), updatedBy: admin.userId }; record(db, admin, AuditAction.ADMIN_CONFIGURATION_UPDATED, 'amia', 'global', { reason: text(body.reason, 'reason', { min: 5, max: 500 }), previousState: { enabled: previousState.enabled, moderation: previousState.moderation, capabilities: previousState.capabilities }, newState: { enabled: body.enabled, moderation, capabilities: db.adminSettings.amia.capabilities } }); return db.adminSettings.amia })
     },
 
-    async auditLog(query, user) { await requireAdmin(user); return paginate([...await store.read('adminAuditLogs')].sort(newestFirst), query) },
+    async auditLog(query, user) {
+      await requireAdmin(user)
+      const action = text(query.get('action'), 'action', { max: 100, required: false })
+      const actorId = text(query.get('actorId'), 'actorId', { max: 160, required: false })
+      const resourceType = text(query.get('resourceType'), 'resourceType', { max: 100, required: false })
+      const resourceId = text(query.get('resourceId'), 'resourceId', { max: 160, required: false })
+      const status = text(query.get('status'), 'status', { max: 20, required: false })
+      if (status && !Object.values(AuditStatus).includes(status)) throw new ApiError(400, 'VALIDATION_ERROR', 'status must be SUCCESS, DENIED, or FAILED')
+      const from = query.get('from'); const to = query.get('to')
+      if (from && Number.isNaN(Date.parse(from))) throw new ApiError(400, 'VALIDATION_ERROR', 'from must be a valid date')
+      if (to && Number.isNaN(Date.parse(to))) throw new ApiError(400, 'VALIDATION_ERROR', 'to must be a valid date')
+      const rows = [...await store.read('adminAuditLogs')].filter((item) => (!action || item.action === action) && (!actorId || (item.actorId || item.administratorId) === actorId) && (!resourceType || (item.resourceType || item.targetType) === resourceType) && (!resourceId || (item.resourceId || item.targetId) === resourceId) && (!status || (item.status || String(item.result).toUpperCase()) === status) && (!from || new Date(item.createdAt) >= new Date(from)) && (!to || new Date(item.createdAt) <= new Date(to))).sort(newestFirst)
+      return paginate(rows, query)
+    },
   }
 }
